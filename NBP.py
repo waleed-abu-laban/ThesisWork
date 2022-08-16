@@ -3,11 +3,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow.python.framework import ops
 from helper_functions import load_code, syndrome
-
-class Decoder:
-    def __init__(self) -> None:
-        pass
-        
+ 
 def ReadData(path):
     global vNodes, cNodes, vDegrees, cDegrees, weights, biases
     if(parityCode =="HDPC"):

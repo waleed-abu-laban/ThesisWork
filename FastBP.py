@@ -31,7 +31,7 @@ def ReadLLRs(f, N):
 def SimulateChannel(y, channelType, parameter = 0, codeRate = 1):
     data = 0 * y
     if(channelType == 'BSC'):
-        flipVec = 1*(np.random.rand(y.size) <= parameter) # eps = parameter
+        flipVec = 1*(np.random.rand(y.size) <= parameter)  # eps = parameter
         data = 1*np.logical_xor(y, flipVec)
     elif(channelType == 'AWGN'):
         # Symbol mapper
