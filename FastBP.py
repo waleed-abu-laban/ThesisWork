@@ -1,26 +1,63 @@
 import numpy as np
+from helper_functions import load_code, syndrome
 
 def ReadData(path):
-    f = open(path + ".txt", "r")
-    NxNK = f.readline()
-    NxNK = NxNK.split(" ")
-    N = int(NxNK[0])
-    NK = int(NxNK[1])
-    global vNodes
-    global cNodes
-    global Edges
-    edgeIndex = 0
-    for i in range(N):
-        onesPos = f.readline().split(" ")
-        if(i == 0):
-            vNodes = np.zeros([N, len(onesPos)], dtype=int) #[[0 for i in range(len(onesPos))] for j in range(N)]
-            cNodesTemp = [[] for j in range(NK)]
-            Edges = np.zeros(N * len(onesPos))
-        for j in range(len(onesPos)):
-            vNodes[i][j] = edgeIndex #int(onesPos[j])
-            cNodesTemp[int(onesPos[j])].append(edgeIndex)
-            edgeIndex += 1
-    cNodes = np.array(cNodesTemp, dtype=int)
+    global Edges, vNodes, cNodes, vDegrees, cDegrees
+    if(parityCode =="HDPC"):
+        code = load_code(path, '')
+        H = code.H
+        G = code.G
+        num_edges = code.num_edges
+        cNodesTemp = code.u
+        vNodesTemp = code.d
+        m = code.m
+
+        N = code.n
+        NK = code.k
+        vDegrees = code.var_degrees
+        cDegrees = code.chk_degrees
+
+        vNodes = np.zeros((len(vNodesTemp), max(vDegrees)), dtype=int)
+        for j in range(len(vNodesTemp)):
+            vNodesRow = np.array([])
+            for i in range(max(vDegrees)):
+                if(len(vNodesTemp[j]) > i):
+                    vNodesRow = np.append(vNodesRow, vNodesTemp[j][i])
+                else:
+                    vNodesRow = np.append(vNodesRow, -1)
+            vNodes[j] = vNodesRow
+
+        cNodes = np.zeros((len(cNodesTemp), max(cDegrees)), dtype=int)
+        for j in range(len(cNodesTemp)):
+            cNodesRow = np.array([])
+            for i in range(max(cDegrees)):
+                if(len(cNodesTemp[j]) > i):
+                    cNodesRow = np.append(cNodesRow, cNodesTemp[j][i])
+                else:
+                    cNodesRow = np.append(cNodesRow, -1)
+            cNodes[j] = cNodesRow
+
+        Edges = np.zeros(num_edges + 1)
+    else:
+        f = open(path + ".txt", "r")
+        NxNK = f.readline()
+        NxNK = NxNK.split(" ")
+        N = int(NxNK[0])
+        NK = int(NxNK[1])
+        edgeIndex = 0
+        for i in range(N):
+            onesPos = f.readline().split(" ")
+            if(i == 0):
+                vNodes = np.zeros([N, len(onesPos)], dtype=int) #[[0 for i in range(len(onesPos))] for j in range(N)]
+                cNodesTemp = [[] for j in range(NK)]
+                Edges = np.zeros(N * len(onesPos))
+            for j in range(len(onesPos)):
+                vNodes[i][j] = edgeIndex #int(onesPos[j])
+                cNodesTemp[int(onesPos[j])].append(edgeIndex)
+                edgeIndex += 1
+        cNodes = np.array(cNodesTemp, dtype=int)
+        vDegrees = vNodes.shape[1]
+        cDegrees = cNodes.shape[1]
 
 def ReadLLRs(f, N):
     LLRs = np.array([])
@@ -63,13 +100,15 @@ def ThresholdClip():
     #Edges[Edges > threshold] = threshold # Why not there?
 
 def CalculateVMarginals():
+    temp = Edges[-1]
     sum = LLRs + np.sum(Edges[np.array(vNodes)], axis = 1) # Calculate Variable Belief
     Edges[np.array(vNodes).flatten()] = np.repeat(sum, vNodes.shape[1]) - Edges[np.array(vNodes).flatten()]
-    ThresholdClip()
+    Edges[-1] = 0
+    #ThresholdClip()
     return sum
 
 def BoxPlusOp(L1, L2):
-    maxThreshold = 1e30 #1e200
+    maxThreshold = 1e200
     term1 =(1 + np.exp(L1 + L2))
     term1[term1 < -maxThreshold] = -maxThreshold
     term1[term1 > maxThreshold] = maxThreshold
@@ -100,7 +139,7 @@ def CalculateCMarginals():
     for i in np.arange(1, cNodes.shape[1] - 1, 1):
         Edges[np.array(cNodes[:, i]).flatten()] = BoxPlusOp(F[:, i-1], B[:, -(i+1)])
     #Edges[np.array(cNodes).flatten()] *= np.repeat(syndrom, cNodes.shape[1])
-    ThresholdClip()
+    #ThresholdClip()
 
 def CalculateSyndrom():
     return np.sum(1 * (Edges[np.array(cNodes)] < 0), axis = 1) % 2
@@ -123,19 +162,31 @@ def BeliefPropagation(lMax):
     return decodedLLRs, decodedWord
 
 # Parameters
-Ns = [256, 1024, 2048, 4096, 8192]
+parityCode = "HDPC"
+if(parityCode == "HDPC"):
+    Ns = [63]
+    NKs = [45]
+else:
+    Ns = [256, 1024, 2048, 4096, 8192]
+    NKs = [ j // 2 for j in Ns]
 channelType = 'AWGN' # BSC or AWGN
-lMax = 10
-allParameters = [np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)] 
+lMax = 5
+if(parityCode == "HDPC"):
+    allParameters = [np.arange(1,7)]
+else:
+    allParameters = [np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)] 
 counter = 0
 readLLRs = False
 LLRs = np.array([])
 for N in Ns:
-    NK = N//2
-    codeRate = 1 - (NK / N)
+    NK = NKs[counter]
+    codeRate = (NK / N)
     parameters = allParameters[counter]
     counter += 1
-    dataPath = "ldpc_h_reg_dv3_dc6_N" + str(N) + "_Nk" + str(NK)
+    if(parityCode == "HDPC"):
+        dataPath = "codesBCH\BCH_" + str(N) + "_" + str(NK) + ".alist"
+    else:
+        dataPath = "codesLDPC\ldpc_h_reg_dv3_dc6_N" + str(N) + "_Nk" + str(NK)
     maxFrameErrorCount = 500
     maxFrames = 2000000
     # Acquire data (H matrix and LLRs)
