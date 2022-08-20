@@ -3,7 +3,27 @@ from helper_functions import load_code, syndrome
 
 def ReadData(path):
     global Edges, vNodes, cNodes, vDegrees, cDegrees
-    if(parityCode =="HDPC"):
+    if(parityCode =="LDPC"):
+        f = open(path + ".txt", "r")
+        NxNK = f.readline()
+        NxNK = NxNK.split(" ")
+        N = int(NxNK[0])
+        NK = int(NxNK[1])
+        edgeIndex = 0
+        for i in range(N):
+            onesPos = f.readline().split(" ")
+            if(i == 0):
+                vNodes = np.zeros([N, len(onesPos)], dtype=int) #[[0 for i in range(len(onesPos))] for j in range(N)]
+                cNodesTemp = [[] for j in range(NK)]
+                Edges = np.zeros(N * len(onesPos))
+            for j in range(len(onesPos)):
+                vNodes[i][j] = edgeIndex #int(onesPos[j])
+                cNodesTemp[int(onesPos[j])].append(edgeIndex)
+                edgeIndex += 1
+        cNodes = np.array(cNodesTemp, dtype=int)
+        vDegrees = vNodes.shape[1]
+        cDegrees = cNodes.shape[1]
+    else:
         code = load_code(path, '')
         H = code.H
         G = code.G
@@ -38,26 +58,6 @@ def ReadData(path):
             cNodes[j] = cNodesRow
 
         Edges = np.zeros(num_edges + 1)
-    else:
-        f = open(path + ".txt", "r")
-        NxNK = f.readline()
-        NxNK = NxNK.split(" ")
-        N = int(NxNK[0])
-        NK = int(NxNK[1])
-        edgeIndex = 0
-        for i in range(N):
-            onesPos = f.readline().split(" ")
-            if(i == 0):
-                vNodes = np.zeros([N, len(onesPos)], dtype=int) #[[0 for i in range(len(onesPos))] for j in range(N)]
-                cNodesTemp = [[] for j in range(NK)]
-                Edges = np.zeros(N * len(onesPos))
-            for j in range(len(onesPos)):
-                vNodes[i][j] = edgeIndex #int(onesPos[j])
-                cNodesTemp[int(onesPos[j])].append(edgeIndex)
-                edgeIndex += 1
-        cNodes = np.array(cNodesTemp, dtype=int)
-        vDegrees = vNodes.shape[1]
-        cDegrees = cNodes.shape[1]
 
 def ReadLLRs(f, N):
     LLRs = np.array([])
@@ -119,25 +119,23 @@ def BoxPlusOp(L1, L2):
 
 def BoxPlusDecoder(index):
     if(index == 0):
-        F = np.expand_dims(Edges[np.array(cNodes[:, index]).flatten()], axis = 1)
-
-        B = np.expand_dims(Edges[np.array(cNodes[:, -(1+index)]).flatten()], axis = 1)
+        F = np.expand_dims(Edges[np.array(cNodes[:, index])], axis = 1)
+        B = np.expand_dims(Edges[np.array(cNodes[range(cNodes.shape[0]), cDegrees -(1+index)])], axis = 1)
     else:
         F, B = BoxPlusDecoder(index - 1)
 
-        result = np.expand_dims(BoxPlusOp(F[:, -1], Edges[np.array(cNodes[:, index]).flatten()]), axis = 1)
+        result = np.expand_dims(BoxPlusOp(F[:, -1], Edges[np.array(cNodes[:, index])]), axis = 1)
         F = np.append(F, result, axis = 1)
-
-        result = np.expand_dims(BoxPlusOp(B[:, -1], Edges[np.array(cNodes[:, -(1+index)]).flatten()]), axis = 1)
+        result = np.expand_dims(BoxPlusOp(B[:, -1], Edges[np.array(cNodes[range(cNodes.shape[0]), cDegrees -(1+index)])]), axis = 1)
         B = np.append(B, result, axis = 1)
     return F, B
 
 def CalculateCMarginals():
     F, B = BoxPlusDecoder(cNodes.shape[1] - 2)
-    Edges[np.array(cNodes[:, 0]).flatten()] = B[:, -1]
-    Edges[np.array(cNodes[:, -1]).flatten()] = F[:, -1]
     for i in np.arange(1, cNodes.shape[1] - 1, 1):
-        Edges[np.array(cNodes[:, i]).flatten()] = BoxPlusOp(F[:, i-1], B[:, -(i+1)])
+        Edges[np.array(cNodes[:, i])] = BoxPlusOp(F[:, i-1], B[range(B.shape[0]), cDegrees - (i+2)])
+    Edges[np.array(cNodes[:, 0])] = B[range(B.shape[0]), cDegrees - 2]
+    Edges[np.array(cNodes[range(cNodes.shape[0]), cDegrees - 1])] = F[range(F.shape[0]), cDegrees - 2]
     #Edges[np.array(cNodes).flatten()] *= np.repeat(syndrom, cNodes.shape[1])
     #ThresholdClip()
 
@@ -162,19 +160,22 @@ def BeliefPropagation(lMax):
     return decodedLLRs, decodedWord
 
 # Parameters
-parityCode = "HDPC"
-if(parityCode == "HDPC"):
+parityCode = "LDPC"
+if(parityCode == "LDPC"):
+    Ns = [1024]#[256, 1024, 2048, 4096, 8192]
+    NKs = [ j // 2 for j in Ns]
+elif(parityCode == "BCH"):
     Ns = [63]
     NKs = [45]
-else:
-    Ns = [256, 1024, 2048, 4096, 8192]
-    NKs = [ j // 2 for j in Ns]
+else: # Polar
+    Ns = [128]
+    NKs = [64]
 channelType = 'AWGN' # BSC or AWGN
-lMax = 5
-if(parityCode == "HDPC"):
-    allParameters = [np.arange(1,7)]
+lMax = 10
+if(parityCode == "LDPC"):
+    allParameters = [np.arange(0.5, 3.3, 0.4)] #[np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)] 
 else:
-    allParameters = [np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)] 
+    allParameters = [np.arange(1,7)]
 counter = 0
 readLLRs = False
 LLRs = np.array([])
@@ -183,10 +184,12 @@ for N in Ns:
     codeRate = (NK / N)
     parameters = allParameters[counter]
     counter += 1
-    if(parityCode == "HDPC"):
-        dataPath = "codesBCH\BCH_" + str(N) + "_" + str(NK) + ".alist"
-    else:
+    if(parityCode == "LDPC"):
         dataPath = "codesLDPC\ldpc_h_reg_dv3_dc6_N" + str(N) + "_Nk" + str(NK)
+    elif(parityCode == "BCH"):
+        dataPath = "codesHDPC\BCH_" + str(N) + "_" + str(NK) + ".alist"
+    else: # Polar
+        dataPath = "codesHDPC\polar_" + str(N) + "_" + str(NK) + ".alist"
     maxFrameErrorCount = 500
     maxFrames = 2000000
     # Acquire data (H matrix and LLRs)
@@ -219,6 +222,6 @@ for N in Ns:
             
         BER.append(errorCountTotal / N / frameCount)
         print(BER[-1])
-    np.savetxt("LDPC_(3,6)_n"+ str(N) + "_k" + str(NK) + "_BP_Random_" + str(lMax) + "it_AWGN_Fastpy.txt", BER)
+    np.savetxt(parityCode + "_n"+ str(N) + "_k" + str(NK) + "_BP_Random_" + str(lMax) + "it_AWGN_Fastpy.txt", BER)
     if(readLLRs):
         f.close()
