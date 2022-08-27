@@ -6,25 +6,7 @@ from helper_functions import load_code, syndrome
  
 def ReadData(path):
     global vNodes, cNodes, vDegrees, cDegrees, weights, biases
-    if(parityCode =="HDPC"):
-        code = load_code(path, '')
-        H = code.H
-        G = code.G
-        num_edges = code.num_edges
-        cNodesTemp = code.u
-        vNodesTemp = code.d
-        m = code.m
-
-        N = code.n
-        NK = code.k
-        vDegrees = code.var_degrees
-        cDegrees = code.chk_degrees
-        vNodes = tf.ragged.constant(vNodesTemp, dtype=tf.int64)
-        cNodes = tf.ragged.constant(cNodesTemp, dtype=tf.int64)
-        initializer = tf.keras.initializers.TruncatedNormal(mean = 1.0, stddev=0.0)#, seed=1)
-        weights = tf.Variable(initializer(shape=(lMax, num_edges)), dtype=tf.float64, trainable=True)
-        biases = tf.Variable(initializer(shape=(lMax, N)), dtype=tf.float64, trainable=True)
-    else:
+    if(parityCode =="LDPC"):
         f = open(path + ".txt", "r")
         NxNK = f.readline()
         NxNK = NxNK.split(" ")
@@ -45,10 +27,26 @@ def ReadData(path):
         cNodes = tf.constant(cNodesTemp, dtype=tf.int64)
         vDegrees = np.repeat(vNodes.shape[1], repeats = vNodes.shape[0])
         cDegrees = np.repeat(cNodes.shape[1], repeats = cNodes.shape[0])
-        initializer = tf.keras.initializers.TruncatedNormal(mean = 1.0, stddev=0.0)#, seed=1)
         weights = tf.Variable(initializer(shape=(lMax, N * vNodes.shape[1])), dtype=tf.float64, trainable=True)
         biases = tf.Variable(initializer(shape=(lMax, N)), dtype=tf.float64, trainable=True)
+    else:
+        code = load_code(path, '')
+        H = code.H
+        G = code.G
+        num_edges = code.num_edges
+        cNodesTemp = code.u
+        vNodesTemp = code.d
+        m = code.m
 
+        N = code.n
+        NK = code.k
+        vDegrees = code.var_degrees
+        cDegrees = code.chk_degrees
+        vNodes = tf.ragged.constant(vNodesTemp, dtype=tf.int64)
+        cNodes = tf.ragged.constant(cNodesTemp, dtype=tf.int64)
+        initializer = tf.keras.initializers.TruncatedNormal(mean = 1.0, stddev=0.0)#, seed=1)
+        weights = tf.Variable(initializer(shape=(lMax, num_edges)), dtype=tf.float64, trainable=True)
+        biases = tf.Variable(initializer(shape=(lMax, N)), dtype=tf.float64, trainable=True)
 
 # def ReadLLRs(path, N):
 #     LLRsTemp = []
@@ -115,7 +113,7 @@ def CalculateVMarginals(Edges, iteration):
     flatIndices = tf.reshape(vNodes, [-1])
     newValues =  tf.repeat(sum, repeats=vDegrees, axis = 0) - tf.gather(Edges, flatIndices) * tf.gather(weightsIt, flatIndices) 
     Edges = IndexFilter(Edges, flatIndices, newValues)
-    Edges = tf.clip_by_value(Edges, clip_value_min=-30, clip_value_max=1e200)
+    #Edges = tf.clip_by_value(Edges, clip_value_min=-30, clip_value_max=1e200)
     return Edges, sum
 
 def BoxPlusOp(L1, L2):
@@ -154,7 +152,7 @@ def CalculateCMarginals(Edges):
     for i in np.arange(1, max(cDegrees) - 1, 1):
         # The recursion is the non regular check nodes case needs more testing
         newEdges += IndexFilter(Edges, tf.gather(cNodes, i, axis = 1), BoxPlusOp(F[:, :, i-1], B[:, :, -(i+1)]))
-    newEdges = tf.clip_by_value(newEdges, clip_value_min=-30, clip_value_max=1e200)
+    #newEdges = tf.clip_by_value(newEdges, clip_value_min=-30, clip_value_max=1e200)
     return newEdges
 
 def CalculateSyndrom(Edges):
@@ -201,24 +199,31 @@ def Cost():
     CalculateLLRs(channelOutput, channelType = channelType, parameters = parameters, codeRate = codeRate)
     return BeliefPropagationOp()
 
-parityCode = "HDPC"
+parityCode = "BCH"
 TRAINDATA = False
 tf.compat.v1.enable_eager_execution()
 # Parameters
-if(parityCode == "HDPC"):
-    Ns = [63]#, 1024, 2048, 4096, 8192]
+if(parityCode == "LDPC"):
+    Ns = [1024]#[256, 1024, 2048, 4096, 8192]
+    NKs = [ j // 2 for j in Ns]
+elif(parityCode == "BCH"):
+    Ns = [63]
     NKs = [45]
-else:
-    Ns = [1024]
-    NKs = [512]
+else: # Polar
+    Ns = [128]
+    NKs = [64]
 channelType = 'AWGN' # BSC or AWGN
 lMax = 5
 batchSize = 120
 snrBatchSize = 20
-tf.keras.backend.set_floatx('float64')
 learningRate = 0.1
 epochs = 1
-parameters = [5]#np.arange(1,7) #np.arange(0.5, 3.3, 0.4) #[np.linspace(0.5, 5, 19), np.linspace(0.5, 3, 7), np.linspace(0.5, 2.5, 7), np.linspace(0.5, 2.2, 7), np.linspace(0.5, 2.2, 9)]
+initializer = tf.keras.initializers.TruncatedNormal(mean = 1.0, stddev=0.0)#, seed=1)
+tf.keras.backend.set_floatx('float64')
+if(parityCode == "LDPC"):
+    allParameters = [np.arange(0.5, 3.3, 0.4)] #[np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)] 
+else:
+    allParameters = [np.arange(2,7)]
 counter = 0
 readLLRs = False
 if(readLLRs):
@@ -227,19 +232,21 @@ if(readLLRs):
 for N in Ns:
     NK = NKs[counter]
     codeRate = (NK / N)
-    labels = tf.zeros([N, batchSize], dtype=tf.float64)
+    parameters = allParameters[counter]
     counter += 1
-    if(parityCode == "HDPC"):
-        dataPath = "codesBCH\BCH_" + str(N) + "_" + str(NK) + ".alist" #"ldpc_h_reg_dv3_dc6_N" + str(N) + "_Nk" + str(NK)
-    else:
-        dataPath = "ldpc_h_reg_dv3_dc6_N" + str(N) + "_Nk" + str(NK)
-    maxFrameErrorCount = 1
+    if(parityCode == "LDPC"):
+        dataPath = "codesLDPC\ldpc_h_reg_dv3_dc6_N" + str(N) + "_Nk" + str(NK)
+    elif(parityCode == "BCH"):
+        dataPath = "codesHDPC\BCH_" + str(N) + "_" + str(NK) + ".alist"
+    else: # Polar
+        dataPath = "codesHDPC\polar_" + str(N) + "_" + str(NK) + ".alist"
+    maxFrameErrorCount = 500
     maxFrames = 2000000
     # Acquire data (H matrix and LLRs)
     ReadData(dataPath)
 
     if(TRAINDATA):
-        waleed = 0
+        labels = tf.zeros([N, batchSize], dtype=tf.float64)
         losses = tfp.math.minimize(Cost,
                         num_steps=epochs,
                         optimizer=tf.optimizers.Adam(learning_rate=learningRate))
@@ -284,7 +291,7 @@ for N in Ns:
             
             BER.append(errorCountTotal / N / frameCount)
             print(BER[-1])
-        np.savetxt("HDPC_(3,6)_n"+ str(N) + "_k" + str(NK) + "_BP_Random_" + str(lMax) + "it_AWGN_Tensorpy.txt", BER)
+        np.savetxt(parityCode + "_n"+ str(N) + "_k" + str(NK) + "_BP_Random_" + str(lMax) + "it_AWGN_Fastpy.txt", BER)
         
 
 
