@@ -44,7 +44,7 @@ def ReadData(path):
         cDegrees = code.chk_degrees
         vNodes = tf.ragged.constant(vNodesTemp, dtype=tf.int64)
         cNodes = tf.ragged.constant(cNodesTemp, dtype=tf.int64)
-        initializer = tf.keras.initializers.TruncatedNormal(mean = 1.0, stddev=0.0)#, seed=1)
+        initializer = tf.keras.initializers.TruncatedNormal(mean=1.0, stddev=0.0)#, seed=1)
         weights = tf.Variable(initializer(shape=(lMax, num_edges)), dtype=tf.float64, trainable=True)
         biases = tf.Variable(initializer(shape=(lMax, N)), dtype=tf.float64, trainable=True)
 
@@ -125,33 +125,51 @@ def BoxPlusOp(L1, L2):
     return tf.math.log(term1 / term2)
 
 def BoxPlusDecoder(Edges, index):
-    rangeIndices = tf.range(index.shape[0])
-    twoDimIndicesF = tf.transpose([rangeIndices, index])
-    twoDimIndicesB = tf.transpose([rangeIndices, cDegrees-(1+index)])
+    rangeIndices = tf.range(cDegrees.shape[0])
+    mask1 = np.minimum(cDegrees-1, index)
+    mask2 = np.minimum(cDegrees-1, max(cDegrees)-(1+index))
+    twoDimIndicesF = tf.transpose([rangeIndices, mask1])
+    twoDimIndicesB = tf.transpose([rangeIndices, mask2])
 
     FFlatIndices = tf.gather_nd(cNodes, twoDimIndicesF)
     BFlatIndices = tf.gather_nd(cNodes, twoDimIndicesB)
-    if(index.all() == 0):  
+    if(index == 0):  
         F = tf.expand_dims(tf.gather(Edges, FFlatIndices), -1)
         B = tf.expand_dims(tf.gather(Edges, BFlatIndices), -1)
     else:
-        # The recursion is the non regular check nodes case needs more testing
-        F, B = BoxPlusDecoder(Edges, np.maximum(index - 1, 0)) 
+        F, B = BoxPlusDecoder(Edges, index - 1) 
 
-        result = tf.expand_dims(BoxPlusOp(F[:, :, -1], tf.gather(Edges, FFlatIndices)), -1)
+        result = tf.expand_dims(BoxPlusOp(F[:, :, -1], tf.expand_dims(tf.cast(mask1 == index, tf.float64), -1) * tf.gather(Edges, FFlatIndices)), -1)
         F = tf.experimental.numpy.append(F, result, axis = -1)
 
-        result = tf.expand_dims(BoxPlusOp(B[:, :, -1], tf.gather(Edges, BFlatIndices)), -1)
+        # For the irregular case the recursion must return the same value until it hits a real edge
+        # To achieve that the following parameters should be passed : BoxPlusOp(L1 = -value, L2 = -inf)
+        isRealEdge = mask2 == (max(cDegrees)-(1+index))
+        negationFilter = tf.expand_dims(tf.cast(isRealEdge, tf.float64), -1) * 2 - 1
+        mInfFilter = (tf.expand_dims(tf.cast(~isRealEdge, tf.float64), -1) * -(np.finfo(np.float64).max - 1)) + 1
+        result = tf.expand_dims(BoxPlusOp(negationFilter * B[:, :, -1], mInfFilter * tf.gather(Edges, BFlatIndices)), -1)
         B = tf.experimental.numpy.append(B, result, axis = -1)
     return F, B
 
 def CalculateCMarginals(Edges):
-    F, B = BoxPlusDecoder(Edges, cDegrees - 2)
-    newEdges = IndexFilter(Edges, tf.gather(cNodes, 0, axis = 1), B[:, :, -1])
-    newEdges += IndexFilter(Edges, tf.gather(cNodes, max(cDegrees) - 1, axis = 1), F[:, :, -1])
+    F, B = BoxPlusDecoder(Edges, max(cDegrees) - 2)
+    rangeIndices = np.arange(cDegrees.shape[0])
+    rangeBatches = np.arange(LLRs.shape[1])
+    newEdges = tf.zeros_like(Edges)
     for i in np.arange(1, max(cDegrees) - 1, 1):
-        # The recursion is the non regular check nodes case needs more testing
-        newEdges += IndexFilter(Edges, tf.gather(cNodes, i, axis = 1), BoxPlusOp(F[:, :, i-1], B[:, :, -(i+1)]))
+        filteredRangeIndices = rangeIndices[cDegrees > i]
+        twoDimIndicesCN = tf.transpose([filteredRangeIndices, tf.zeros_like(filteredRangeIndices) + i])
+        threeDimIndicesF = tf.transpose([tf.tile(filteredRangeIndices, [rangeBatches.shape[0]]), tf.repeat(rangeBatches, filteredRangeIndices.shape[0]), tf.tile(tf.zeros_like(filteredRangeIndices) + i-1, [rangeBatches.shape[0]])])
+        threeDimIndicesB = tf.transpose([tf.tile(filteredRangeIndices, [rangeBatches.shape[0]]), tf.repeat(rangeBatches, filteredRangeIndices.shape[0]), tf.tile(tf.zeros_like(filteredRangeIndices) + max(cDegrees) - (i+2), [rangeBatches.shape[0]])])
+        filteredF = tf.gather_nd(F, threeDimIndicesF)
+        filteredB = tf.gather_nd(B, threeDimIndicesB)
+        filteredCN = tf.gather_nd(cNodes, twoDimIndicesCN)
+        newEdges += IndexFilter(Edges, filteredCN, BoxPlusOp(filteredF, filteredB))
+    twoDimIndicesCN = tf.transpose([rangeIndices, tf.zeros_like(rangeIndices) + cDegrees - 1])
+    threeDimIndicesF = tf.transpose([tf.tile(rangeIndices, [rangeBatches.shape[0]]), tf.repeat(rangeBatches, rangeIndices.shape[0]), tf.tile(cDegrees - 2, [rangeBatches.shape[0]])])
+    threeDimIndicesB = tf.transpose([tf.tile(rangeIndices, [rangeBatches.shape[0]]), tf.repeat(rangeBatches, rangeIndices.shape[0]), tf.tile(tf.zeros_like(rangeIndices) + max(cDegrees) - 2, [rangeBatches.shape[0]])])
+    newEdges += IndexFilter(Edges, tf.gather(cNodes, 0, axis = 1), tf.gather_nd(B, threeDimIndicesB))
+    newEdges += IndexFilter(Edges, tf.gather_nd(cNodes, twoDimIndicesCN), tf.gather_nd(F, threeDimIndicesF))
     #newEdges = tf.clip_by_value(newEdges, clip_value_min=-30, clip_value_max=1e200)
     return newEdges
 
@@ -160,6 +178,8 @@ def CalculateSyndrom(Edges):
 
 @tf.function
 def ContinueCalculation(decodedLLRs, Edges, iteration, loss):
+    if(iteration == 0):
+        return True
     if(iteration >= lMax):
         return False
     if(tf.reduce_sum(tf.cast(decodedLLRs < 0, tf.int64)) == 0): # zeroCodeWord
@@ -171,7 +191,6 @@ def BeliefPropagationIt(decodedLLRs, Edges, iteration, loss):
     Edges, decodedLLRs = CalculateVMarginals(Edges, iteration) # Variable nodes
     if(TRAINDATA):
         loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=-decodedLLRs, labels=labels)) #/ lMax
-        tf.print(loss)
     iteration += 1
     return decodedLLRs, Edges, iteration, loss
 
@@ -189,6 +208,7 @@ def BeliefPropagationOp():
                          tf.constant(0,dtype=tf.int32),\
                          tf.constant(0.0, dtype=tf.float64)])
     if(TRAINDATA):
+        tf.print(loss)
         return loss
     else:
         return decodedLLRs
@@ -216,14 +236,14 @@ channelType = 'AWGN' # BSC or AWGN
 lMax = 5
 batchSize = 120
 snrBatchSize = 20
-learningRate = 0.1
-epochs = 1
+learningRate = 0.001
+epochs = 10001
 initializer = tf.keras.initializers.TruncatedNormal(mean = 1.0, stddev=0.0)#, seed=1)
 tf.keras.backend.set_floatx('float64')
 if(parityCode == "LDPC"):
     allParameters = [np.arange(0.5, 3.3, 0.4)] #[np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)] 
 else:
-    allParameters = [np.arange(2,7)]
+    allParameters = [np.arange(1,7)]
 counter = 0
 readLLRs = False
 if(readLLRs):
@@ -249,7 +269,7 @@ for N in Ns:
         labels = tf.zeros([N, batchSize], dtype=tf.float64)
         losses = tfp.math.minimize(Cost,
                         num_steps=epochs,
-                        optimizer=tf.optimizers.Adam(learning_rate=learningRate))
+                        optimizer=tf.optimizers.SGD(learning_rate=learningRate))
 
         # for step in range(epochs):
         #     if(readLLRs):

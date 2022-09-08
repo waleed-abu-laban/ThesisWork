@@ -160,7 +160,7 @@ def BeliefPropagation(lMax):
     return decodedLLRs, decodedWord
 
 # Parameters
-parityCode = "LDPC"
+parityCode = "Polar"
 if(parityCode == "LDPC"):
     Ns = [1024]#[256, 1024, 2048, 4096, 8192]
     NKs = [ j // 2 for j in Ns]
@@ -171,7 +171,7 @@ else: # Polar
     Ns = [128]
     NKs = [64]
 channelType = 'AWGN' # BSC or AWGN
-lMax = 10
+lMax = 5
 if(parityCode == "LDPC"):
     allParameters = [np.arange(0.5, 3.3, 0.4)] #[np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)] 
 else:
