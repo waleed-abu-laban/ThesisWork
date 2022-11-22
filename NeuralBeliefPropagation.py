@@ -13,8 +13,7 @@ class NBPInstance(tf.Module):
         self.lMax = lMax
         self.LossFunction = LossFunctor
         self.Channel = Channel
-        self.GenerateCodeWords() # to set the batch size and the default syndrome based on the generated LLRs
-        self.SetSyndrome(tf.zeros_like(self.LLRs))
+        self.SetSyndrome(tf.zeros((self.vNodes.shape[0], Channel.GetBatchSize())))
         self.weights = tf.ones(shape=(lMax, CodeDescriptor.EdgesCount), dtype=tf.float64)
         self.biases = tf.ones(shape=(lMax, CodeDescriptor.vNodes.shape[0]), dtype=tf.float64)
 
@@ -44,7 +43,7 @@ class NBPInstance(tf.Module):
     def ChangeBatchSize(self, newBatchSize):
         self.Channel.SetBatchSize(newBatchSize)
         self.batchSize = newBatchSize
-        self.SetSyndrome(tf.zeros([self.LLRs.shape[0], newBatchSize]))
+        self.SetSyndrome(tf.zeros([self.vNodes.shape[0], newBatchSize]))
 
     def ChangeChannelParameters(self, newChannelParameters):
         self.Channel.SetChannelParameters(newChannelParameters)

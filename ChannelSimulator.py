@@ -38,6 +38,9 @@ class Channel(object):
         self.parameters = parameters
         self.codeRate = codeRate
 
+    def GetBatchSize(self):
+        return self.batchSize
+
     def SetBatchSize(self, batchSize):
         self.batchSize = batchSize
 

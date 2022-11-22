@@ -176,7 +176,7 @@ def ReadDataTF(path, parityCode):
         cNodes = tf.constant(cNodesTemp, dtype=tf.int64)
         vDegrees = np.repeat(vNodes.shape[1], repeats = vNodes.shape[0])
         cDegrees = np.repeat(cNodes.shape[1], repeats = cNodes.shape[0])
-        EdgesCount = Edges.size
+        EdgesCount = Edges.shape[0]
     else:
         code = load_code(path, '')
         H = code.H
