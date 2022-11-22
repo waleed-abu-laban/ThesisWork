@@ -1,349 +1,226 @@
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
-from tensorflow.python.framework import ops
-from helper_functions import load_code, syndrome
- 
-def ReadData(path):
-    global vNodes, cNodes, vDegrees, cDegrees, weights, biases
-    if(parityCode =="LDPC"):
-        f = open(path + ".txt", "r")
-        NxNK = f.readline()
-        NxNK = NxNK.split(" ")
-        N = int(NxNK[0])
-        NK = int(NxNK[1])
-        edgeIndex = 0
-        for i in range(N):
-            onesPos = f.readline().split(" ")
-            if(i == 0):
-                vNodesTemp = [[0 for i in range(len(onesPos))] for j in range(N)]
-                cNodesTemp = [[] for j in range(NK)]
-                #decoder.Edges = tf.zeros(N * len(onesPos), dtype=tf.float64)
-            for j in range(len(onesPos)):
-                vNodesTemp[i][j] = edgeIndex
-                cNodesTemp[int(onesPos[j])].append(edgeIndex)
-                edgeIndex += 1
-        vNodes = tf.constant(vNodesTemp, dtype=tf.int64)
-        cNodes = tf.constant(cNodesTemp, dtype=tf.int64)
-        vDegrees = np.repeat(vNodes.shape[1], repeats = vNodes.shape[0])
-        cDegrees = np.repeat(cNodes.shape[1], repeats = cNodes.shape[0])
-        weights = tf.Variable(initializer(shape=(lMax, N * vNodes.shape[1])), dtype=tf.float64, trainable=True)
-        biases = tf.Variable(initializer(shape=(lMax, N)), dtype=tf.float64, trainable=True)
-    else:
-        code = load_code(path, '')
-        H = code.H
-        G = code.G
-        num_edges = code.num_edges
-        cNodesTemp = code.u
-        vNodesTemp = code.d
-        m = code.m
+from DataReader import ReadDataTF
+from ChannelSimulator import Channel
+from NeuralBeliefPropagation import NBPInstance
+import LossFunctions as lf
 
-        N = code.n
-        NK = code.k
-        vDegrees = code.var_degrees
-        cDegrees = code.chk_degrees
-        vNodes = tf.ragged.constant(vNodesTemp, dtype=tf.int64)
-        cNodes = tf.ragged.constant(cNodesTemp, dtype=tf.int64)
-        initializer = tf.keras.initializers.TruncatedNormal(mean=1.0, stddev=0.0)#, seed=1)
-        weights = tf.Variable(initializer(shape=(lMax, num_edges)), dtype=tf.float64, trainable=True)
-        biases = tf.Variable(initializer(shape=(lMax, N)), dtype=tf.float64, trainable=True)
+tf.config.run_functions_eagerly(True)
+tf.keras.backend.set_floatx('float64')
 
-# def ReadLLRs(path, N):
-#     LLRsTemp = []
-#     f = open(path + ".txt", "r")
-#     for i in range(N):
-#         LLRsTemp.append(float(f.readline()))
-#     global LLRs
-#     LLRs = tf.constant(LLRsTemp, dtype=tf.float32)
-
-def ReadLLRs(f, N):
-    LLRsTemp = np.array([])
-    for i in range(N):
-        LLRsTemp = np.append(LLRsTemp, float(f.readline()))
-    return tf.constant(LLRsTemp, dtype=tf.float64)
-
-def SimulateChannel(y, channelType, parameters = 0, codeRate = 1):
-    data = 0 * y
-    if(channelType == 'BSC'):
-        flipVec = 1*(np.random.rand(y.size) <= parameters) # eps = parameter
-        data = 1*np.logical_xor(y, flipVec)
-    elif(channelType == 'AWGN'):
-        # Symbol mapper
-        symbols = y * -2 +1
-        # Noise
-        EbN0 = 10**(parameters/10) # EbN0dB = parameter
-        No = 1/(EbN0 * codeRate)
-        noiseVar = No/2
-        symbolsShape = symbols.shape
-        noise = np.random.randn(symbolsShape[0], symbolsShape[1]) * np.repeat(np.expand_dims(np.sqrt(noiseVar), -1), symbolsShape[1], axis = 1)
-        # Modulated data
-        data = symbols + noise
-    return data
-
-def CalculateLLRs(y, channelType, parameters = 0, codeRate = 1):
-    LLRsTemp = y * 0
-    if(channelType == 'BSC'):
-        y1LLR = np.log(parameters) - np.log(1-parameters) # eps = parameter
-        LLRsTemp = (y*2-1) * y1LLR
-    elif(channelType == 'AWGN'):
-        EbN0 = 10**(parameters/10) # EbN0dB = parameter
-        No = 1/(EbN0 * codeRate)
-        noiseVar = No/2
-        LLRsTemp = y*2 / np.repeat(np.expand_dims(np.sqrt(noiseVar), -1), y.shape[1], axis = 1)
-    global LLRs
-    LLRs = tf.constant(LLRsTemp, shape=[N, y.size//N], dtype=tf.float64)
-
-def IndexFilter(array, indicesToChange, valuesChange):
-    flatValuesChange = tf.reshape(tf.transpose(valuesChange), [-1])
-    indexChange = tf.expand_dims(tf.tile(indicesToChange, [LLRs.shape[1]]), -1)
-    batchIndices = tf.expand_dims(tf.repeat(tf.range(LLRs.shape[1], dtype=tf.int64), repeats= indicesToChange.shape[0]), -1)
-    indicesChange = tf.concat([indexChange, batchIndices], axis = 1)
-
-    #indexChange = tf.stack( [flatIndicesToChange], axis=1 )
-    elementsChange = tf.sparse.reorder(tf.SparseTensor(indicesChange, flatValuesChange, tf.shape(array, out_type=tf.int64)))
-    flatFilteredArray = tf.sparse.to_dense(elementsChange, default_value = 0.)
-    return tf.reshape(flatFilteredArray, tf.shape(array))
-
-def CalculateVMarginals(Edges, iteration):
-    weightsIt = tf.tile(tf.reshape(weights[iteration], [-1, 1]), [1, LLRs.shape[1]])
-    biasesIt = tf.tile(tf.reshape(biases[iteration], [-1, 1]), [1, LLRs.shape[1]])
-    weightedEdges =  tf.gather(Edges, vNodes) * tf.gather(weightsIt, vNodes)
-    biasedLLRs = LLRs * biasesIt
-    sum = biasedLLRs + tf.reduce_sum(weightedEdges, axis = 1) # Calculate Variable Belief
-    flatIndices = tf.reshape(vNodes, [-1])
-    newValues =  tf.repeat(sum, repeats=vDegrees, axis = 0) - tf.gather(Edges, flatIndices) * tf.gather(weightsIt, flatIndices) 
-    Edges = IndexFilter(Edges, flatIndices, newValues)
-    #Edges = tf.clip_by_value(Edges, clip_value_min=-30, clip_value_max=1e200)
-    return Edges, sum
-
-def BoxPlusOp(L1, L2):
-    maxThreshold = 1e200
-    term1 = (1 + tf.keras.activations.exponential(L1 + L2))
-    term1 = tf.clip_by_value(term1, -maxThreshold, maxThreshold)
-    term2 = (tf.keras.activations.exponential(L1) +tf.keras.activations.exponential(L2))
-    term2 = tf.clip_by_value(term2, -maxThreshold, maxThreshold)
-    return tf.math.log(term1 / term2)
-
-def BoxPlusDecoder(Edges, index):
-    rangeIndices = tf.range(cDegrees.shape[0])
-    mask1 = np.minimum(cDegrees-1, index)
-    mask2 = np.minimum(cDegrees-1, max(cDegrees)-(1+index))
-    twoDimIndicesF = tf.transpose([rangeIndices, mask1])
-    twoDimIndicesB = tf.transpose([rangeIndices, mask2])
-
-    FFlatIndices = tf.gather_nd(cNodes, twoDimIndicesF)
-    BFlatIndices = tf.gather_nd(cNodes, twoDimIndicesB)
-    if(index == 0):  
-        F = tf.expand_dims(tf.gather(Edges, FFlatIndices), -1)
-        B = tf.expand_dims(tf.gather(Edges, BFlatIndices), -1)
-    else:
-        F, B = BoxPlusDecoder(Edges, index - 1) 
-
-        result = tf.expand_dims(BoxPlusOp(F[:, :, -1], tf.expand_dims(tf.cast(mask1 == index, tf.float64), -1) * tf.gather(Edges, FFlatIndices)), -1)
-        F = tf.experimental.numpy.append(F, result, axis = -1)
-
-        # For the irregular case the recursion must return the same value until it hits a real edge
-        # To achieve that the following parameters should be passed : BoxPlusOp(L1 = -value, L2 = -inf)
-        isRealEdge = mask2 == (max(cDegrees)-(1+index))
-        negationFilter = tf.expand_dims(tf.cast(isRealEdge, tf.float64), -1) * 2 - 1
-        mInfFilter = (tf.expand_dims(tf.cast(~isRealEdge, tf.float64), -1) * -(np.finfo(np.float64).max - 1)) + 1
-        result = tf.expand_dims(BoxPlusOp(negationFilter * B[:, :, -1], mInfFilter * tf.gather(Edges, BFlatIndices)), -1)
-        B = tf.experimental.numpy.append(B, result, axis = -1)
-    return F, B
-
-def CalculateCMarginals(Edges):
-    F, B = BoxPlusDecoder(Edges, max(cDegrees) - 2)
-    rangeIndices = np.arange(cDegrees.shape[0])
-    rangeBatches = np.arange(LLRs.shape[1])
-    newEdges = tf.zeros_like(Edges)
-    for i in np.arange(1, max(cDegrees) - 1, 1):
-        filteredRangeIndices = rangeIndices[cDegrees > i]
-        twoDimIndicesCN = tf.transpose([filteredRangeIndices, tf.zeros_like(filteredRangeIndices) + i])
-        threeDimIndicesF = tf.transpose([tf.tile(filteredRangeIndices, [rangeBatches.shape[0]]), tf.repeat(rangeBatches, filteredRangeIndices.shape[0]), tf.tile(tf.zeros_like(filteredRangeIndices) + i-1, [rangeBatches.shape[0]])])
-        threeDimIndicesB = tf.transpose([tf.tile(filteredRangeIndices, [rangeBatches.shape[0]]), tf.repeat(rangeBatches, filteredRangeIndices.shape[0]), tf.tile(tf.zeros_like(filteredRangeIndices) + max(cDegrees) - (i+2), [rangeBatches.shape[0]])])
-        filteredF = tf.gather_nd(F, threeDimIndicesF)
-        filteredB = tf.gather_nd(B, threeDimIndicesB)
-        filteredCN = tf.gather_nd(cNodes, twoDimIndicesCN)
-        newEdges += IndexFilter(Edges, filteredCN, BoxPlusOp(filteredF, filteredB))
-    twoDimIndicesCN = tf.transpose([rangeIndices, tf.zeros_like(rangeIndices) + cDegrees - 1])
-    threeDimIndicesF = tf.transpose([tf.tile(rangeIndices, [rangeBatches.shape[0]]), tf.repeat(rangeBatches, rangeIndices.shape[0]), tf.tile(cDegrees - 2, [rangeBatches.shape[0]])])
-    threeDimIndicesB = tf.transpose([tf.tile(rangeIndices, [rangeBatches.shape[0]]), tf.repeat(rangeBatches, rangeIndices.shape[0]), tf.tile(tf.zeros_like(rangeIndices) + max(cDegrees) - 2, [rangeBatches.shape[0]])])
-    newEdges += IndexFilter(Edges, tf.gather(cNodes, 0, axis = 1), tf.gather_nd(B, threeDimIndicesB))
-    newEdges += IndexFilter(Edges, tf.gather_nd(cNodes, twoDimIndicesCN), tf.gather_nd(F, threeDimIndicesF))
-    #newEdges = tf.clip_by_value(newEdges, clip_value_min=-30, clip_value_max=1e200)
-    return newEdges
-
-def CalculateSyndrom(Edges):
-    return tf.reduce_sum(tf.cast(tf.gather(Edges, cNodes) < 0, tf.int64), axis = 1) % 2
-
-@tf.function
-def ContinueCalculation(decodedLLRs, Edges, iteration, loss):
-    if(iteration == 0):
-        return True
-    if(iteration >= lMax):
-        return False
-    if(tf.reduce_sum(tf.cast(decodedLLRs < 0, tf.int64)) == 0): # zeroCodeWord
-        return False
-    return tf.reduce_sum(CalculateSyndrom(Edges)) != 0 # isCodeWord other than zero
-
-def BeliefPropagationIt(decodedLLRs, Edges, iteration, loss):
-    Edges = CalculateCMarginals(Edges) # Check nodes
-    Edges, decodedLLRs = CalculateVMarginals(Edges, iteration) # Variable nodes
-    if(TRAINDATA):
-        loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=-decodedLLRs, labels=labels)) #/ lMax
-    iteration += 1
-    return decodedLLRs, Edges, iteration, loss
-
-def BeliefPropagationOp():
-    #Initialize
-    Edges = tf.zeros([weights.shape[1], LLRs.shape[1]], dtype=tf.float64)
-    Edges = IndexFilter(Edges, tf.reshape(vNodes, [-1]), tf.repeat(LLRs, repeats=vDegrees, axis = 0))
-    # parameters: [decodedLLRs, Edges, iteration, loss]
-    decodedLLRs, Edges, iteration, loss = \
-                        tf.while_loop(\
-                         ContinueCalculation,\
-                         BeliefPropagationIt,\
-                        [tf.ones([N, LLRs.shape[1]], dtype=tf.float64) * -1,\
-                         Edges,\
-                         tf.constant(0,dtype=tf.int32),\
-                         tf.constant(0.0, dtype=tf.float64)])
-    if(TRAINDATA):
-        tf.print(loss)
-        return loss
-    else:
-        return decodedLLRs
-
-def Cost():
-    y = np.zeros([batchSize//snrBatchSize, snrBatchSize * N])
-    channelOutput = SimulateChannel(y, channelType = channelType, parameters = parameters, codeRate = codeRate)
-    CalculateLLRs(channelOutput, channelType = channelType, parameters = parameters, codeRate = codeRate)
-    return BeliefPropagationOp()
-
+# Parameters ==============================================================================
 parityCode = "BCH"
-TRAINDATA = False
-tf.compat.v1.enable_eager_execution()
-# Parameters
+maxFrameErrorCount = 500
+maxFrames = 200000
+SaveResults = True
+#------------------------------------------------------------------------------------------
+TRAINDATA = True
+TESTDATA = True
+#------------------------------------------------------------------------------------------
 if(parityCode == "LDPC"):
-    Ns = [1024]#[256, 1024, 2048, 4096, 8192]
+    Ns = [256, 1024, 2048, 4096, 8192]
     NKs = [ j // 2 for j in Ns]
+    lMax = 12
+    allParameters = [np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)]
+    channelType = 'AWGN' # BSC or AWGN
+    dataPaths = []
+    modelsPaths = []
+    resultsPaths = []
+    for i in range(len(Ns)):
+        N = Ns[i]
+        NK = NKs[i]
+        dataPaths.append("codesLDPC\ldpc_h_reg_dv3_dc6_N" + str(N) + "_Nk" + str(NK))
+        modelsPaths.append("Models\\" + str(parityCode) + "_N" + str(N) + "_Nk" + str(NK))
+        resultsPaths.append("Results\\" + str(parityCode) + "_N"+ str(N) + "_NK" + str(NK) + "_NBP_" + str(lMax) + "it_" + str(channelType) + ".txt")
+    
+    LossFunction = lf.LossFunctionCE()
+    initializer = tf.keras.initializers.TruncatedNormal(mean=1.0, stddev=0.0, seed=1)
+    batchSizeTrain = 120
+    learningRate = 0.0001
+    epochs = 10001
+    batchSizeTest = 1000
+#------------------------------------------------------------------------------------------
 elif(parityCode == "BCH"):
     Ns = [63]
     NKs = [45]
-else: # Polar
+    lMax = 5
+    allParameters = [np.arange(1,7)]
+    channelType = 'AWGN'
+    dataPaths = []
+    modelsPaths = []
+    resultsPaths = []
+    for i in range(len(Ns)):
+        N = Ns[i]
+        NK = NKs[i]
+        dataPaths.append("codesHDPC\BCH_" + str(N) + "_" + str(NK) + ".alist")
+        modelsPaths.append("Models\\" + str(parityCode) + "_N" + str(N) + "_Nk" + str(NK))
+        resultsPaths.append("Results\\" + str(parityCode) + "_N"+ str(N) + "_NK" + str(NK) + "_NBP_" + str(lMax) + "it_" + str(channelType) + ".txt")
+    
+    LossFunction = lf.LossFunctionCE()
+    initializer = tf.keras.initializers.TruncatedNormal(mean=0.7, stddev=0.5, seed=1)
+    batchSizeTrain = 120
+    learningRate = 0.001
+    epochs = 10001
+    batchSizeTest = 1000
+#------------------------------------------------------------------------------------------
+elif(parityCode == "Polar"):
     Ns = [128]
     NKs = [64]
-channelType = 'AWGN' # BSC or AWGN
-lMax = 5
-batchSize = 120
-snrBatchSize = 20
-learningRate = 0.001
-epochs = 10001
-initializer = tf.keras.initializers.TruncatedNormal(mean = 1.0, stddev=0.0)#, seed=1)
-tf.keras.backend.set_floatx('float64')
-if(parityCode == "LDPC"):
-    allParameters = [np.arange(0.5, 3.3, 0.4)] #[np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)] 
-else:
+    lMax = 12
     allParameters = [np.arange(1,7)]
-counter = 0
-readLLRs = False
-if(readLLRs):
-    LLRsPath = "CLLRs"
-    f = open(LLRsPath + ".txt", "r")
-for N in Ns:
+    channelType = 'AWGN'
+    dataPaths = []
+    modelsPaths = []
+    resultsPaths = []
+    for i in range(len(Ns)):
+        N = Ns[i]
+        NK = NKs[i]
+        dataPaths.append("codesHDPC\polar_" + str(N) + "_" + str(NK) + ".alist")
+        modelsPaths.append("Models\\" + str(parityCode) + "_N" + str(N) + "_Nk" + str(NK))
+        resultsPaths.append("Results\\" + str(parityCode) + "_N"+ str(N) + "_NK" + str(NK) + "_NBP_" + str(lMax) + "it_" + str(channelType) + ".txt")
+    
+    LossFunction = lf.LossFunctionCE()
+    initializer = tf.keras.initializers.TruncatedNormal(mean=1.0, stddev=0.0, seed=1)
+    batchSizeTrain = 120
+    learningRate = 0.0001
+    epochs = 10001
+    batchSizeTest = 1000
+#------------------------------------------------------------------------------------------
+elif(parityCode == "QHypergraph"):
+    Ns = [129 * 2]
+    NKs = [28]
+    lMax = 12
+    allParameters = [np.array([1e-2, 5.9e-3, 3.5e-3, 2.1e-3, 1.2e-3, 7.8e-4, 4.5e-4, 2.7e-4, 1.6e-4, 9.7e-5])] #[np.arange(1e-2, 5e-2, 7e-3)]
+    channelType = 'BSC'
+    dataPaths = []
+    dataPathsOrtho = []
+    modelsPaths = []
+    resultsPaths = []
+    for i in range(len(Ns)):
+        N = Ns[i]
+        NK = NKs[i]
+        dataPaths.append("codesQLDPC\Hypergraph_" + str(N//2) + "_" + str(NK) + ".alist")
+        dataPathsOrtho.append("codesQLDPC\HorthoMatrix_Hypergraph_" + str(N//2) + "_" + str(NK) + ".txt")
+        modelsPaths.append("Models\\" + str(parityCode) + "_N" + str(N//2) + "_Nk" + str(NK))
+        resultsPaths.append("Results\\" + str(parityCode) + "_N"+ str(N//2) + "_NK" + str(NK) + "_NBP_" + str(lMax) + "it_" + str(channelType) + ".txt")
+    
+    LossFunction = lf.LossFunctionLiu()
+    initializer = tf.keras.initializers.TruncatedNormal(mean=0.7, stddev=0.5, seed=1)
+    batchSizeTrain = 120
+    learningRate = 0.0001
+    epochs = 10001
+    batchSizeTest = 1000
+#------------------------------------------------------------------------------------------
+else: # QBicycle
+    Ns = [256 * 2]
+    NKs = [32]
+    lMax = 12
+    allParameters = [np.array([1e-2, 3e-3, 1e-3, 3e-4, 1e-4])]
+    channelType = 'BSC'
+    dataPaths = []
+    dataPathsOrtho = []
+    modelsPaths = []
+    resultsPaths = []
+    for i in range(len(Ns)):
+        N = Ns[i]
+        NK = NKs[i]
+        dataPaths.append("codesQLDPC\Bicycle_" + str(N//2) + "_" + str(NK) + ".alist")
+        dataPathsOrtho.append("codesQLDPC\HorthoMatrix_Bicycle_" + str(N//2) + "_" + str(NK) + ".txt")
+        modelsPaths.append("Models\\" + str(parityCode) + "_N" + str(N//2) + "_Nk" + str(NK))
+        resultsPaths.append("Results\\" + str(parityCode) + "_N"+ str(N//2) + "_NK" + str(NK) + "_NBP_" + str(lMax) + "it_" + str(channelType) + ".txt")
+    
+    LossFunction = lf.LossFunctionLiu()
+    initializer = tf.keras.initializers.TruncatedNormal(mean=1.0, stddev=0.0, seed=1)
+    batchSizeTrain = 120
+    learningRate = 0.0001
+    epochs = 10001
+    batchSizeTest = 1000
+#------------------------------------------------------------------------------------------
+
+# Simulation ==============================================================================
+for counter in range(len(Ns)):
+    # inititalize -------------------------------------------------------------------------
+    N = Ns[counter]
     NK = NKs[counter]
-    codeRate = (NK / N)
     parameters = allParameters[counter]
-    counter += 1
-    if(parityCode == "LDPC"):
-        dataPath = "codesLDPC\ldpc_h_reg_dv3_dc6_N" + str(N) + "_Nk" + str(NK)
-    elif(parityCode == "BCH"):
-        dataPath = "codesHDPC\BCH_" + str(N) + "_" + str(NK) + ".alist"
-    else: # Polar
-        dataPath = "codesHDPC\polar_" + str(N) + "_" + str(NK) + ".alist"
-    maxFrameErrorCount = 500
-    maxFrames = 2000000
-    # Acquire data (H matrix and LLRs)
-    ReadData(dataPath)
+    dataPath = dataPaths[counter]
+    modelPath = modelsPaths[counter]
+    resultPath = resultsPaths[counter]
+    CodeDescriptor = ReadDataTF(dataPath, parityCode)
+    ChannelObject = Channel(N, batchSizeTrain, channelType, parameters, NK / N)
+    IsQuantum = False
+    if(parityCode[0] == "Q"):
+        IsQuantum = True
+        Hortho = np.loadtxt(dataPathsOrtho[counter])
+        if(TRAINDATA):
+            LossFunction.SetHOrtho(Hortho)
+    NBPObject = NBPInstance(CodeDescriptor, IsQuantum, lMax, LossFunction, ChannelObject)
+    errorRateTotal = []
 
+    # train -------------------------------------------------------------------------
     if(TRAINDATA):
-        labels = tf.zeros([N, batchSize], dtype=tf.float64)
-        losses = tfp.math.minimize(Cost,
+        weights = tf.Variable(initializer(shape=(lMax, CodeDescriptor.EdgesCount)), dtype=tf.float64, trainable=True)
+        biases = tf.Variable(initializer(shape=(lMax, N)), dtype=tf.float64, trainable=True)
+        NBPObject.SetWeightsBiases(weights, biases)
+
+        losses = tfp.math.minimize(NBPObject.TrainNBP,
                         num_steps=epochs,
-                        optimizer=tf.optimizers.SGD(learning_rate=learningRate))
+                        optimizer=tf.optimizers.Adam(learning_rate=learningRate))
+        tf.saved_model.save(NBPObject, modelPath)
 
-        # for step in range(epochs):
-        #     if(readLLRs):
-        #         LLRs = ReadLLRs(f, N)
-        #     else:
-        #         y = np.zeros(N)
-        #         channelOutput = SimulateChannel(y, channelType = channelType, parameter = parameter, codeRate = codeRate)
-        #         CalculateLLRs(channelOutput, channelType = channelType, parameter = parameter, codeRate = codeRate)
-            
-
-        #     optimizer = tf.keras.optimizers.Adam(learning_rate = learningRate).minimize(BeliefPropagationOp, var_list=[weights, biases])
-            
-        #     if(step % 100 == 0):
-        #         print(str(step) + " minibatches completed")
-        TRAINDATA = False
-
-    if(not TRAINDATA):
-        BER = []
-        for parameter in parameters:
-            errorCountTotal = 0
-            frameCount = 0
-            frameErrorCount = 0
-            while((frameErrorCount < maxFrameErrorCount) and (frameCount < maxFrames)):
-                if(readLLRs):
-                    LLRs = ReadLLRs(f, N)
-                else:
-                    y = np.zeros([N, 1])
-                    channelOutput = SimulateChannel(y, channelType = channelType, parameters = np.array([parameter]), codeRate = codeRate)
-                    CalculateLLRs(channelOutput, channelType = channelType, parameters = np.array([parameter]), codeRate = codeRate)
-                 
-                    decodedLLRs = BeliefPropagationOp() # Run BP algorithm
-                    
-                    errorCount = np.sum(tf.cast(decodedLLRs < 0, tf.int64))
-                    errorCountTotal += errorCount
-                    frameCount += 1
-                    frameErrorCount += (1*(errorCount > 0))
-                    #if(frameCount % 100 == 0):
-                    print(N, parameter, frameCount, errorCountTotal / N / frameCount, frameErrorCount)
-            
-            BER.append(errorCountTotal / N / frameCount)
-            print(BER[-1])
-        np.savetxt(parityCode + "_n"+ str(N) + "_k" + str(NK) + "_BP_Random_" + str(lMax) + "it_AWGN_Fastpy.txt", BER)
+    # test -------------------------------------------------------------------------
+    if(TESTDATA):
+        tensorflow_graph = tf.saved_model.load(modelPath)
+        weights = tensorflow_graph.__getattribute__("weights")
+        biases = tensorflow_graph.__getattribute__("biases")
+        NBPObject.SetWeightsBiases(weights, biases)
         
+    # run NBP -------------------------------------------------------------------------
+    # inititalize
+    NBPObject.SetLossFunctor(lf.LossFunctionNULL())
+    NBPObject.ChangeBatchSize(batchSizeTest)
+    errorRateTotal = []
+    # loop over all parameters ------------------------------------------------------------
+    for parameter in parameters:
+        # inititalize
+        NBPObject.ChangeChannelParameters(np.array([parameter]))
+        errorCountTotal = 0
+        frameCount = 0
+        frameErrorCount = 0
+        # check if the processed data is within the test limits
+        while((frameErrorCount < maxFrameErrorCount) and (frameCount < maxFrames)):
 
+             # run NBP algorithm
+            Edges, decodedWord, channelOutput = NBPObject.NeuralBeliefPropagationOp()
+            
+            # calculate the error rates ---------------------------------------------------
+            # ******************* BLER *******************
+            if(IsQuantum):
+                filterData = np.sum(NBPObject.CalculateSyndrome(Edges), axis = 0) > 0
+                filteredDecodedWord = decodedWord.numpy()[:, filterData]
+                filteredChannelOutput = channelOutput[:, filterData]
 
-# # Parameters
-# N = 1024
-# NK = N//2
-# lMax = 10
-# EbN0dB = 3
-# eps = 0.1
-# channelType = 'AWGN' # BSC or AWGN
-# codeRate = 1 - (NK / N)
-# dataPath = "ldpc_h_reg_dv3_dc6_N" + str(N) + "_Nk" + str(NK)
-# readLLRs = False
-# LLRsPath = "CLLRs"
-# maxFrameErrorCount = 30
-# maxFrames = 2000000
+                errorTotal = (filteredDecodedWord + filteredChannelOutput) % 2
+                errorCount = np.sum(np.dot(Hortho, errorTotal) % 2, axis = 0)
+                frameErrorCount += np.sum(1*(errorCount > 0))
+                frameCount += batchSizeTest
+                errorRate = frameErrorCount / frameCount
+            # ******************* BER *******************
+            else:
+                errorCount = np.sum(decodedWord, axis=0)
+                errorCountTotal += np.sum(errorCount)
+                frameCount += batchSizeTest
+                frameErrorCount += np.sum(1*(errorCount > 0))
+                errorRate = errorCountTotal / N / frameCount
 
-# batch_size = 120
-# labels = np.zeros([N,batch_size])
-# initializer = tf.keras.initializers.TruncatedNormal(mean = 0.0, stddev=1.0)#, seed=1)
+            # print the data to keep track -------------------------------------------------
+            print(N, parameter, frameCount, errorRate, frameErrorCount)
+        
+        # keep track of the results --------------------------------------------------------
+        errorRateTotal.append(errorRate)
+        print(errorRateTotal[-1])
 
-# # Acquire data (H matrix and LLRs)
-# decoder = ReadData(dataPath)
-# if(readLLRs):
-#     ReadLLRs(LLRsPath, N)
-# else:
-#     y = np.zeros(N)
-#     channelOutput = SimulateChannel(y, channelType = channelType, eps = eps, EbN0dB = EbN0dB, codeRate = codeRate)
-#     CalculateLLRs(channelOutput, channelType = channelType, eps = eps, EbN0dB = EbN0dB, codeRate = codeRate)
-
-# decoder.Edges, _ = CalculateVMarginals(decoder.Edges)
-# decodedLLRs, decoder.Edges, iteration, loss = BeliefPropagationOp(decoder.Edges)
-# print(np.sum(tf.cast(decodedLLRs < 0, tf.int64)))
-
-
+    # save the total results from this set of parameters -----------------------------------
+    if(SaveResults):
+        np.savetxt(resultPath, errorRateTotal)
