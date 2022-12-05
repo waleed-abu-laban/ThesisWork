@@ -54,19 +54,8 @@ def load_code(H_filename, G_filename):
 
 		num_edges = H.sum()
 
-	if G_filename == "":
-		G = []
-	else:
-		if "BCH" in H_filename: # dear God please fix this
-			G = np.loadtxt(G_filename).astype(np.int)
-			G = G.transpose()
-		else:
-			P = np.loadtxt(G_filename,skiprows=2)
-			G = np.vstack([P.transpose(), np.eye(k)]).astype(np.int)
-
 	code = Code()
 	code.H = H
-	code.G = G
 	code.var_degrees = var_degrees
 	code.chk_degrees = chk_degrees
 	code.num_edges = num_edges
@@ -180,7 +169,6 @@ def ReadDataTF(path, parityCode):
     else:
         code = load_code(path, '')
         H = code.H
-        G = code.G
         num_edges = code.num_edges
         cNodesTemp = code.u
         vNodesTemp = code.d

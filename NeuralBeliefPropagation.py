@@ -105,7 +105,7 @@ class NBPInstance(tf.Module):
             B = tf.experimental.numpy.append(B, result, axis = -1)
         return F, B
 
-    def CalculateCMarginals(self, Edges):
+    def CalculateCMarginals2(self, Edges):
         F, B = self.BoxPlusDecoder(Edges, max(self.cDegrees) - 2)
         rangeIndices = np.arange(self.cDegrees.shape[0])
         rangeBatches = np.arange(self.batchSize)
@@ -131,6 +131,37 @@ class NBPInstance(tf.Module):
         #newEdges = tf.clip_by_value(newEdges, clip_value_min=-30, clip_value_max=1e200)
         #return newEdges
     
+    def phiOp(self, x):
+        exponent = tf.keras.activations.exponential(x)
+        phiResult = tf.math.log( (exponent + 1.0) / (exponent - 1.0) )
+        return tf.clip_by_value(phiResult, 0.0, 1.0e+30)
+
+    def CalculateCMarginals(self, Edges):
+        flatIndices = tf.reshape(self.cNodes, [-1])
+        sign = tf.cast(tf.gather(Edges, flatIndices) >= 0,  tf.float64)
+        test1 = sign.numpy()
+        absVal = sign * tf.gather(Edges, flatIndices)
+        test2 = absVal.numpy()
+        phiValues = self.phiOp(absVal)
+        test3 = phiValues.numpy()
+        orderedPhiValues = tf.gather(phiValues, self.cNodes)
+        test4 = orderedPhiValues.numpy()
+        totalSum = tf.reduce_sum(orderedPhiValues, axis = 1)
+        test5 = totalSum.numpy()
+        temptemp = tf.repeat(totalSum, repeats=self.cDegrees ,axis=0)
+        prodValues = sign * self.phiOp(tf.repeat(totalSum, repeats=self.cDegrees ,axis=0) - phiValues)
+        test6 = prodValues.numpy()
+        for i in 
+        test7 = prodValues.numpy()
+
+        # sign = 1*(Edges[np.array(self.cNodes).flatten()] >= 0)
+        # absVal = sign * Edges[np.array(self.cNodes).flatten()]
+        # phiValues = self.phiOp(absVal)
+        # totalSum = np.sum(phiValues, axis = 1)
+        # prodValues = sign * self.phi(totalSum - phiValues)
+        # totalProd = np.prod(prodValues, axis = 1)
+        # return totalProd / prodValues
+
     def CalculateSyndrome(self, Edges):
         return tf.reduce_sum(tf.cast(tf.gather(Edges, self.cNodes) < 0, tf.int64), axis = 1) % 2
 

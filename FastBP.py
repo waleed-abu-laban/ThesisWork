@@ -4,7 +4,7 @@ from DataReader import ReadData
 from ChannelSimulator import SimulateChannel, CalculateLLRs
 
 # Parameters ==============================================================================
-parityCode = "BCH"
+parityCode = "QHypergraph"
 maxFrameErrorCount = 500
 maxFrames = 200000
 SaveData = True
@@ -86,6 +86,9 @@ for counter in range(len(Ns)):
         Hortho = np.loadtxt(dataPathsOrtho[counter])
     errorRateTotal = []
 
+    saveLLRs = []
+    isFirst = True
+
     # loop over all parameters ------------------------------------------------------------
     for parameter in parameters:
         # inititalize ---------------------------------------------------------------------
@@ -98,6 +101,9 @@ for counter in range(len(Ns)):
             y = np.zeros(N)
             channelOutput = SimulateChannel(y, channelType = channelType, parameter = parameter, codeRate = NK / N)
             LLRs = CalculateLLRs(channelOutput, channelType = channelType, parameter = parameter, codeRate = NK / N)
+
+            saveLLRs.append(LLRs)
+            np.savetxt("LLRsTest.txt", np.transpose(np.array(LLRs)))
 
             # initialize the BP edges ----------------------------------------------------
             BPObject.ClearEdges()
@@ -114,7 +120,7 @@ for counter in range(len(Ns)):
             # set the data processed from the parameters ----------------------------------
             BPObject.SetLLRs(LLRs)
             BPObject.SetSyndrome(syndrome)
-            decodedLLRs, decodedWord = BPObject.BeliefPropagation(lMax) # Run BP algorithm
+            decodedLLRs, decodedWord, resultsC, resultsV = BPObject.BeliefPropagation(lMax) # Run BP algorithm
 
             # calculate the error rates ---------------------------------------------------
             # ******************* BLER *******************
@@ -146,3 +152,6 @@ for counter in range(len(Ns)):
         if(parityCode[0] == "Q"):
             N = N//2
         np.savetxt(parityCode + "_n"+ str(N) + "_k" + str(NK) + "_BP_Random_" + str(lMax) + "it_" + channelType + "_Fastpy.txt", errorRateTotal)
+    
+    np.savetxt("LLRsTest.txt", np.transpose(np.array(saveLLRs)))
+    np.savetxt("resultsTest.txt", np.transpose(np.array(resultsC)))

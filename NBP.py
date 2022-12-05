@@ -10,13 +10,13 @@ tf.config.run_functions_eagerly(True)
 tf.keras.backend.set_floatx('float64')
 
 # Parameters ==============================================================================
-parityCode = "BCH"
+parityCode = "QHypergraph"
 maxFrameErrorCount = 500
 maxFrames = 200000
 SaveResults = True
 #------------------------------------------------------------------------------------------
-TRAINDATA = True
-TESTDATA = True
+TRAINDATA = False
+TESTDATA = False
 #------------------------------------------------------------------------------------------
 if(parityCode == "LDPC"):
     Ns = [256, 1024, 2048, 4096, 8192]
@@ -110,7 +110,7 @@ elif(parityCode == "QHypergraph"):
     batchSizeTrain = 120
     learningRate = 0.0001
     epochs = 10001
-    batchSizeTest = 1000
+    batchSizeTest = 1
 #------------------------------------------------------------------------------------------
 else: # QBicycle
     Ns = [256 * 2]
