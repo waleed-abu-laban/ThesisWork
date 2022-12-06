@@ -67,7 +67,7 @@ class NBPInstance(tf.Module):
         flatIndices = tf.reshape(self.vNodes, [-1])
         newValues =  tf.repeat(sum, repeats=self.vDegrees, axis = 0) - tf.gather(Edges, flatIndices) * tf.gather(weightsIt, flatIndices) 
         Edges = self.IndexFilter(Edges, flatIndices, newValues)
-        #Edges = tf.clip_by_value(Edges, clip_value_min=-30, clip_value_max=1e200)
+        #Edges = tf.clip_by_value(Edges, clip_value_min=-10, clip_value_max=10)
         return Edges, sum
 
     def BoxPlusOp(self, L1, L2):
@@ -105,7 +105,7 @@ class NBPInstance(tf.Module):
             B = tf.experimental.numpy.append(B, result, axis = -1)
         return F, B
 
-    def CalculateCMarginals2(self, Edges):
+    def CalculateCMarginalsBoxPlus(self, Edges):
         F, B = self.BoxPlusDecoder(Edges, max(self.cDegrees) - 2)
         rangeIndices = np.arange(self.cDegrees.shape[0])
         rangeBatches = np.arange(self.batchSize)
@@ -132,35 +132,67 @@ class NBPInstance(tf.Module):
         #return newEdges
     
     def phiOp(self, x):
+        mask = tf.cast(x < 30,  tf.float64)
         exponent = tf.keras.activations.exponential(x)
         phiResult = tf.math.log( (exponent + 1.0) / (exponent - 1.0) )
-        return tf.clip_by_value(phiResult, 0.0, 1.0e+30)
+        return tf.clip_by_value(phiResult, 0.0, 1.0e+200) * mask
+
+    def CalculateCMarginalsPhi(self, Edges):
+        flatIndices = tf.reshape(self.cNodes, [-1])
+        sign = tf.cast(tf.gather(Edges, flatIndices) >= 0, tf.float64)*2-1
+        absVal = sign * tf.gather(Edges, flatIndices)
+        phiValues = self.phiOp(absVal)
+        
+        range = tf.experimental.numpy.arange(phiValues.shape[0])
+        reshapedRange = tf.RaggedTensor.from_row_lengths(range, self.cDegrees)
+        orderedPhiValues = tf.gather(phiValues, reshapedRange)
+        totalSum = tf.reduce_sum(orderedPhiValues, axis=1)
+
+        prodValues = sign * (self.phiOp(tf.repeat(totalSum, repeats=self.cDegrees ,axis=0) - phiValues))
+        reshapedProdValues = tf.gather(prodValues, reshapedRange).to_tensor(default_value=1)
+        
+        mask = np.ones(reshapedProdValues.shape[1])
+        mask[0] = 0
+        for i in tf.experimental.numpy.arange(reshapedProdValues.shape[1]):
+            maskedProdValues = tf.boolean_mask(reshapedProdValues, np.roll(mask, i), axis=1)
+            if(i == 0):
+                finalProd = tf.reduce_prod(maskedProdValues, axis=1, keepdims=True)
+            else:
+                finalProd = tf.concat([finalProd, tf.reduce_prod(maskedProdValues, axis=1, keepdims=True)], axis=1)
+
+        finalProdRagged = tf.RaggedTensor.from_tensor(finalProd, lengths=self.cDegrees)
+        finalProdFlat = tf.reshape(finalProdRagged, [-1, finalProdRagged.shape[-1]])
+        Edges = self.IndexFilter(Edges, flatIndices, finalProdFlat)
+        #Edges = tf.clip_by_value(Edges, clip_value_min=-10, clip_value_max=10)
+
+        flatIndices = tf.reshape(self.cNodes, [-1])
+        newValues = tf.gather(Edges, flatIndices) * tf.cast(tf.repeat(self.syndrome, repeats=self.cDegrees, axis = 0), dtype=tf.float64)
+        return self.IndexFilter(Edges, flatIndices, newValues)
 
     def CalculateCMarginals(self, Edges):
-        flatIndices = tf.reshape(self.cNodes, [-1])
-        sign = tf.cast(tf.gather(Edges, flatIndices) >= 0,  tf.float64)
-        test1 = sign.numpy()
-        absVal = sign * tf.gather(Edges, flatIndices)
-        test2 = absVal.numpy()
-        phiValues = self.phiOp(absVal)
-        test3 = phiValues.numpy()
-        orderedPhiValues = tf.gather(phiValues, self.cNodes)
-        test4 = orderedPhiValues.numpy()
-        totalSum = tf.reduce_sum(orderedPhiValues, axis = 1)
-        test5 = totalSum.numpy()
-        temptemp = tf.repeat(totalSum, repeats=self.cDegrees ,axis=0)
-        prodValues = sign * self.phiOp(tf.repeat(totalSum, repeats=self.cDegrees ,axis=0) - phiValues)
-        test6 = prodValues.numpy()
-        for i in 
-        test7 = prodValues.numpy()
+        Edges = tf.clip_by_value(Edges, clip_value_min=-100, clip_value_max=100)
+        tanhValues = tf.tanh(Edges * 0.5)
+        reshapedtanhValues = tf.gather(tanhValues, self.cNodes).to_tensor(default_value=1)
 
-        # sign = 1*(Edges[np.array(self.cNodes).flatten()] >= 0)
-        # absVal = sign * Edges[np.array(self.cNodes).flatten()]
-        # phiValues = self.phiOp(absVal)
-        # totalSum = np.sum(phiValues, axis = 1)
-        # prodValues = sign * self.phi(totalSum - phiValues)
-        # totalProd = np.prod(prodValues, axis = 1)
-        # return totalProd / prodValues
+        mask = np.ones(reshapedtanhValues.shape[1])
+        mask[0] = 0
+        for i in tf.experimental.numpy.arange(reshapedtanhValues.shape[1]):
+            maskedProdValues = tf.boolean_mask(reshapedtanhValues, np.roll(mask, i), axis=1)
+            if(i == 0):
+                finalProd = tf.reduce_prod(maskedProdValues, axis=1, keepdims=True)
+            else:
+                finalProd = tf.concat([finalProd, tf.reduce_prod(maskedProdValues, axis=1, keepdims=True)], axis=1)
+
+        finalProdRagged = tf.RaggedTensor.from_tensor(finalProd, lengths=self.cDegrees)
+        finalProdFlat = tf.reshape(finalProdRagged, [-1, finalProdRagged.shape[-1]])
+        atanhValues = 2*tf.atanh(finalProdFlat)
+        flatIndices = tf.reshape(self.cNodes, [-1])
+        Edges = self.IndexFilter(Edges, flatIndices, atanhValues)
+        #Edges = tf.clip_by_value(Edges, clip_value_min=-10, clip_value_max=10)
+
+        flatIndices = tf.reshape(self.cNodes, [-1])
+        newValues = tf.gather(Edges, flatIndices) * tf.cast(tf.repeat(self.syndrome, repeats=self.cDegrees, axis = 0), dtype=tf.float64)
+        return self.IndexFilter(Edges, flatIndices, newValues)
 
     def CalculateSyndrome(self, Edges):
         return tf.reduce_sum(tf.cast(tf.gather(Edges, self.cNodes) < 0, tf.int64), axis = 1) % 2

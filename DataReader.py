@@ -161,10 +161,10 @@ def ReadDataTF(path, parityCode):
                 vNodesTemp[i][j] = edgeIndex
                 cNodesTemp[int(onesPos[j])].append(edgeIndex)
                 edgeIndex += 1
-        vNodes = tf.constant(vNodesTemp, dtype=tf.int64)
-        cNodes = tf.constant(cNodesTemp, dtype=tf.int64)
-        vDegrees = np.repeat(vNodes.shape[1], repeats = vNodes.shape[0])
-        cDegrees = np.repeat(cNodes.shape[1], repeats = cNodes.shape[0])
+        vNodes = tf.ragged.constant(vNodesTemp, dtype=tf.int64)
+        cNodes = tf.ragged.constant(cNodesTemp, dtype=tf.int64)
+        vDegrees = np.repeat(tf.shape(vNodesTemp)[1], repeats = tf.shape(vNodesTemp)[0])
+        cDegrees = np.repeat(tf.shape(cNodesTemp)[1], repeats = tf.shape(cNodesTemp)[0])
         EdgesCount = Edges.shape[0]
     else:
         code = load_code(path, '')
