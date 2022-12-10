@@ -10,7 +10,7 @@ tf.config.run_functions_eagerly(True)
 tf.keras.backend.set_floatx('float64')
 
 # Parameters ==============================================================================
-parityCode = "QHypergraph"
+parityCode = "LDPC"
 maxFrameErrorCount = 500
 maxFrames = 200000
 SaveResults = True
@@ -19,11 +19,11 @@ TRAINDATA = False
 TESTDATA = False
 #------------------------------------------------------------------------------------------
 if(parityCode == "LDPC"):
-    Ns = [256, 1024, 2048, 4096, 8192]
+    Ns = [1024]#[256, 1024, 2048, 4096, 8192]
     NKs = [ j // 2 for j in Ns]
     lMax = 50
-    allParameters = [np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)]
-    channelType = 'AWGN' # BSC or AWGN
+    allParameters = [np.array([0.05])]#[np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)]
+    channelType = 'BSC' # BSC or AWGN
     dataPaths = []
     modelsPaths = []
     resultsPaths = []

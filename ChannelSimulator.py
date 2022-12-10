@@ -85,4 +85,6 @@ class Channel(object):
         channelOutput = np.zeros([self.N, self.batchSize])
         if(simulateChannel):
             channelOutput = self.SimulateChannelTF(channelOutput)
+        elif(self.channelType == 'AWGN'):
+            channelOutput = channelOutput * -2 +1
         return self.CalculateLLRsTF(channelOutput), channelOutput

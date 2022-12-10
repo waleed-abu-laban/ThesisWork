@@ -67,7 +67,7 @@ class NBPInstance(tf.Module):
         flatIndices = tf.reshape(self.vNodes, [-1])
         newValues =  tf.repeat(sum, repeats=self.vDegrees, axis = 0) - tf.gather(Edges, flatIndices) * tf.gather(weightsIt, flatIndices) 
         Edges = self.IndexFilter(Edges, flatIndices, newValues)
-        #Edges = tf.clip_by_value(Edges, clip_value_min=-10, clip_value_max=10)
+        Edges = tf.clip_by_value(Edges, clip_value_min=-100, clip_value_max=100)
         return Edges, sum
 
     def BoxPlusOp(self, L1, L2):
@@ -170,7 +170,6 @@ class NBPInstance(tf.Module):
         return self.IndexFilter(Edges, flatIndices, newValues)
 
     def CalculateCMarginals(self, Edges):
-        Edges = tf.clip_by_value(Edges, clip_value_min=-100, clip_value_max=100)
         tanhValues = tf.tanh(Edges * 0.5)
         reshapedtanhValues = tf.gather(tanhValues, self.cNodes).to_tensor(default_value=1)
 
@@ -188,7 +187,7 @@ class NBPInstance(tf.Module):
         atanhValues = 2*tf.atanh(finalProdFlat)
         flatIndices = tf.reshape(self.cNodes, [-1])
         Edges = self.IndexFilter(Edges, flatIndices, atanhValues)
-        #Edges = tf.clip_by_value(Edges, clip_value_min=-10, clip_value_max=10)
+        Edges = tf.clip_by_value(Edges, clip_value_min=-100, clip_value_max=100)
 
         flatIndices = tf.reshape(self.cNodes, [-1])
         newValues = tf.gather(Edges, flatIndices) * tf.cast(tf.repeat(self.syndrome, repeats=self.cDegrees, axis = 0), dtype=tf.float64)

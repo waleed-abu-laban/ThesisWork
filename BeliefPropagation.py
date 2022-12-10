@@ -59,7 +59,7 @@ class BPInstance:
             B = np.append(B, result, axis = 1)
         return F, B
 
-    def CalculateCMarginals2(self):
+    def CalculateCMarginalsBoxPlus(self):
         F, B = self.BoxPlusDecoder(self.cNodes.shape[1] - 2)
         for i in np.arange(1, self.cNodes.shape[1] - 1, 1):
             self.Edges[np.array(self.cNodes[:, i])] = self.BoxPlusOp(F[:, i-1], B[range(B.shape[0]), self.cDegrees - (i+2)])
@@ -78,12 +78,12 @@ class BPInstance:
         else:
             return np.log( (np.exp(x)+1.0) / (np.exp(x)-1.0) )
     
-    def CalculateCMarginals(self):
+    def CalculateCMarginalsPhi(self):
         sign = 1*(self.Edges[np.array(self.cNodes).flatten()] >= 0)
         absVal = sign * self.Edges[np.array(self.cNodes).flatten()]
-        phiValues = self.phi(absVal)
+        phiValues = self.phiOp(absVal)
         totalSum = np.sum(phiValues, axis = 1)
-        prodValues = sign * self.phi(totalSum - phiValues)
+        prodValues = sign * self.phiOp(totalSum - phiValues)
         totalProd = np.prod(prodValues, axis = 1)
         return totalProd / prodValues
 

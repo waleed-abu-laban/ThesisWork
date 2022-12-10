@@ -4,17 +4,17 @@ from DataReader import ReadData
 from ChannelSimulator import SimulateChannel, CalculateLLRs
 
 # Parameters ==============================================================================
-parityCode = "QHypergraph"
+parityCode = "LDPC"
 maxFrameErrorCount = 500
 maxFrames = 200000
 SaveData = True
 #------------------------------------------------------------------------------------------
 if(parityCode == "LDPC"):
-    Ns = [256, 1024, 2048, 4096, 8192]
+    Ns = [1024]#[256, 1024, 2048, 4096, 8192]
     NKs = [ j // 2 for j in Ns]
-    lMax = 12
-    allParameters = [np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)]
-    channelType = 'AWGN' # BSC or AWGN
+    lMax = 50
+    allParameters = [np.array([0.35])]#[np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)]
+    channelType = 'BSC' # BSC or AWGN
     dataPaths = []
     for i in range(len(Ns)):
         N = Ns[i]

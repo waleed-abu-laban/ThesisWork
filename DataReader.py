@@ -96,7 +96,6 @@ def ReadData(path, parityCode):
     else:
         code = load_code(path, '')
         H = code.H
-        G = code.G
         num_edges = code.num_edges
         cNodesTemp = code.u
         vNodesTemp = code.d
