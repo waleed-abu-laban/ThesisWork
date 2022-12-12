@@ -138,6 +138,9 @@ else: # QBicycle
     batchSizeTest = 1000
 #------------------------------------------------------------------------------------------
 
+def sigmoid(x):
+    return 1/(1 + np.exp(-x))
+
 # Simulation ==============================================================================
 for counter in range(len(Ns)):
     # inititalize -------------------------------------------------------------------------
@@ -153,9 +156,13 @@ for counter in range(len(Ns)):
     if(parityCode[0] == "Q"):
         IsQuantum = True
         Hortho = np.loadtxt(dataPathsOrtho[counter])
+
+        HMat = np.loadtxt("codesQLDPC\HMatrix_Hypergraph_129_28.txt")
+        MMat = np.loadtxt("codesQLDPC\M.txt")
+
         if(TRAINDATA):
             LossFunction.SetHOrtho(Hortho)
-    NBPObject = NBPInstance(CodeDescriptor, IsQuantum, lMax, LossFunction, ChannelObject)
+    NBPObject = NBPInstance(CodeDescriptor, IsQuantum, lMax, LossFunction, ChannelObject, HMat, MMat)
     errorRateTotal = []
 
     # train -------------------------------------------------------------------------
@@ -196,13 +203,24 @@ for counter in range(len(Ns)):
             
             # calculate the error rates ---------------------------------------------------
             # ******************* BLER *******************
-            if(IsQuantum):
-                filterData = np.sum(NBPObject.CalculateSyndrome(Edges), axis = 0) > 0
-                filteredDecodedWord = decodedWord.numpy()[:, filterData]
-                filteredChannelOutput = channelOutput[:, filterData]
+            if(True):#(IsQuantum):
+                # filterData = np.sum(NBPObject.CalculateSyndrome(Edges), axis = 0) > 0
+                # filteredDecodedWord = decodedWord.numpy()[:, filterData]
+                # filteredChannelOutput = channelOutput[:, filterData]
+                # errorTotal = (filteredDecodedWord + filteredChannelOutput) % 2
 
-                errorTotal = (filteredDecodedWord + filteredChannelOutput) % 2
-                errorCount = np.sum(np.dot(Hortho, errorTotal) % 2, axis = 0)
+                theWord = decodedWord.numpy()
+                theWordSum = np.sum(( np.sum(theWord, axis=0) > 0)*1)
+                HMMat = np.dot(HMat, MMat)
+                isZero = np.sum((np.dot(HMMat, np.transpose(Hortho))) % 2)
+                test222 = np.dot(HMMat, theWord)
+                isZero2 = np.sum(( np.sum(np.dot(HMMat, theWord) % 2, axis=0) > 0)*1)
+                isZero3 = np.sum(( np.sum(np.dot(np.dot(Hortho, MMat), theWord) % 2, axis=0) > 0)*1)
+
+                shiftedDecodedWord = tf.roll((decodedWord)%2, shift=(decodedWord.shape[0] // 2), axis=0)
+                errorTotal = np.sum(shiftedDecodedWord, axis = 0)
+                test = np.dot(Hortho, shiftedDecodedWord) % 2
+                errorCount = np.sum(np.dot(Hortho, shiftedDecodedWord) % 2, axis = 0)
                 frameErrorCount += np.sum(1*(errorCount > 0))
                 frameCount += batchSizeTest
                 errorRate = frameErrorCount / frameCount
