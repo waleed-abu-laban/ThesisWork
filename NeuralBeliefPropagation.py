@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 
 class NBPInstance(tf.Module):
-    def __init__(self, CodeDescriptor, IsQuantum, lMax, LossFunctor, Channel, Hmat, Mmat):
+    def __init__(self, CodeDescriptor, IsQuantum, lMax, LossFunctor, Channel):
         super().__init__()
         self.EdgesCount = CodeDescriptor.EdgesCount
         self.vNodes = CodeDescriptor.vNodes
@@ -13,8 +13,6 @@ class NBPInstance(tf.Module):
         self.lMax = lMax
         self.LossFunction = LossFunctor
         self.Channel = Channel
-        self.HMat = Hmat
-        self.MMat = Mmat
         self.SetSyndrome(tf.zeros((self.vNodes.shape[0], Channel.GetBatchSize())))
         self.weights = tf.ones(shape=(lMax, CodeDescriptor.EdgesCount), dtype=tf.float64)
         self.biases = tf.ones(shape=(lMax, CodeDescriptor.vNodes.shape[0]), dtype=tf.float64)
@@ -32,9 +30,8 @@ class NBPInstance(tf.Module):
     def SetSyndrome(self, LLRs):
         self.batchSize = LLRs.shape[1]
         Edges = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
-        shiftedLLRs = tf.roll(LLRs, shift=(LLRs.shape[0] // 2), axis=0)
-        Edges = self.FillEdges(Edges, shiftedLLRs)
-        self.syndrome = tf.pow(tf.constant(-1, dtype=tf.int64), self.CalculateSyndrome(LLRs))
+        Edges = self.FillEdges(Edges, LLRs)
+        self.syndrome = tf.pow(tf.constant(-1, dtype=tf.int64), self.CalculateSyndrome(Edges))
 
     def SetWeightsBiases(self, weights, biases):
         self.weights = weights
@@ -196,12 +193,7 @@ class NBPInstance(tf.Module):
         newValues = tf.gather(Edges, flatIndices) * tf.cast(tf.repeat(self.syndrome, repeats=self.cDegrees, axis = 0), dtype=tf.float64)
         return self.IndexFilter(Edges, flatIndices, newValues)
 
-    def CalculateSyndrome(self, LLRs):
-        decodedWord = tf.cast(LLRs < 0, tf.int64).numpy()
-        syndrome = np.dot(np.dot(self.HMat, self.MMat), decodedWord) % 2
-        return syndrome
-
-    def CalculateSyndrome2(self, Edges):
+    def CalculateSyndrome(self, Edges):
         return tf.reduce_sum(tf.cast(tf.gather(Edges, self.cNodes) < 0, tf.int64), axis = 1) % 2
 
     def ContinueCalculation(self, decodedLLRs, Edges, iteration, loss):
@@ -209,11 +201,9 @@ class NBPInstance(tf.Module):
             return True
         if(iteration >= self.lMax):
             return False
-        if(not self.IsQuantum):
-            if(tf.reduce_sum(tf.cast(decodedLLRs < 0, tf.int64)) == 0): # zeroCodeWord
-                return False
-            return tf.reduce_sum(self.CalculateSyndrome(Edges)) != 0 # isCodeWord other than zero
-        return tf.reduce_sum(self.CalculateSyndrome(decodedLLRs)) != 0
+        if((not self.IsQuantum) and tf.reduce_sum(tf.cast(decodedLLRs < 0, tf.int64)) == 0): # zeroCodeWord
+           return False
+        return tf.reduce_sum(self.CalculateSyndrome(Edges)) != 0 # isCodeWord other than zero
 
     def BeliefPropagationIt(self, decodedLLRs, Edges, iteration, loss):
         Edges = self.CalculateCMarginals(Edges) # Check nodes
@@ -263,7 +253,7 @@ class NBPInstance(tf.Module):
 
         if(self.IsQuantum):
             self.SetSyndrome(LLRs)
-            #LLRs, _ = self.Channel.GenerateLLRs(False)
+            LLRs, _ = self.Channel.GenerateLLRs(False)
 
         self.SetLLRs(LLRs)
         return channelOutput
