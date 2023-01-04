@@ -204,19 +204,22 @@ for counter in range(len(Ns)):
             # ******************* BLER *******************
             if(IsQuantum):
                 decodedWord = decodedWord.numpy()
+
+                # Flagged
                 originalSynd = NBPObject.CalculateSyndromeHM(channelOutput)
                 decodedSynd = NBPObject.CalculateSyndromeHM(decodedWord)
                 filterDataSynd = np.sum(np.abs(originalSynd - decodedSynd), axis=0) > 0
 
+                # Unflagged
+                decodedWordFiltered = decodedWord[:, np.invert(filterDataSynd)]
+                filterDataHmat = np.sum(np.dot(Hortho, decodedWordFiltered) % 2, axis=0) > 0
+
                 errorWord = (decodedWord + channelOutput) % 2
-                errorWordFiltered = errorWord[:, np.invert(filterDataSynd)]
-                filterDataHmat = np.sum(np.dot(Hortho, errorWordFiltered) % 2, axis = 0) > 0
-                
                 half = tf.shape(errorWord)[0]//2
                 errorTotalSynd = tf.clip_by_value(errorWord[:half, filterDataSynd] + errorWord[half:, filterDataSynd], clip_value_min=0, clip_value_max=1)
-                errorTotalHmat = tf.clip_by_value(errorWordFiltered[:half, filterDataHmat] + errorWordFiltered[half:, filterDataHmat], clip_value_min=0, clip_value_max=1)
-                errorCountSynd = np.sum(errorTotalSynd, axis = 0)
-                errorCountHmat = np.sum(errorTotalHmat, axis = 0)
+                errorTotalHmat = tf.clip_by_value(decodedWordFiltered[:half, filterDataHmat] + decodedWordFiltered[half:, filterDataHmat], clip_value_min=0, clip_value_max=1)
+                errorCountSynd = np.sum(errorTotalSynd, axis=0)
+                errorCountHmat = np.sum(errorTotalHmat, axis=0)
 
                 errorCountTotal += (np.sum(errorCountSynd) + np.sum(errorCountHmat))
                 frameCount += batchSizeTest
