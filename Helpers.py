@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.sparse import csr_matrix
+#from scipy.sparse import csr_matrix
 
 def GenerateCode(N, K, Weights):
     N2 = N//2
@@ -20,11 +20,11 @@ def CreateCyclicMatrix(A, i):
     else:
         return np.expand_dims(A, axis = 0)
 
-def SparseHmatrix(H, fileName):
-    A = csr_matrix(H)
-    with open(fileName, "w") as f:
-        np.savetxt(f, A, fmt='%d')
-    return A
+# def SparseHmatrix(H, fileName):
+#     A = csr_matrix(H)
+#     with open(fileName, "w") as f:
+#         np.savetxt(f, A, fmt='%d')
+#     return A
 
 def FormatHmatrix(H, fileName):
     open(fileName, "w")
@@ -107,11 +107,12 @@ def FormatHmatrix(H, fileName):
         #                 np.savetxt(f, np.array([-1]), fmt='%d', newline=" ")
         #                 counter1 += 1
 
-H = GenerateCode(256, 32, 8)
+#H = GenerateCode(256, 32, 8)
 
 #H = np.genfromtxt("codesQLDPC\Random_QLDPC_H.csv", delimiter=',')
 #print(H)
 
-FormatHmatrix(H, "Bicycle.alist")
-np.savetxt("HMatrix_Bicycle.txt", H, fmt='%d')
+H = np.loadtxt("codesQLDPC\Hz.txt")
+FormatHmatrix(H, "codesQLDPC\Hz.alist")
+#np.savetxt(, H, fmt='%d')
 #print(SparseHmatrix(H, "Bicycle"))

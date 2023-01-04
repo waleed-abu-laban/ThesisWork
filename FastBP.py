@@ -4,7 +4,7 @@ from DataReader import ReadData
 from ChannelSimulator import SimulateChannel, CalculateLLRs
 
 # Parameters ==============================================================================
-parityCode = "LDPC"
+parityCode = "QHypergraph"
 maxFrameErrorCount = 500
 maxFrames = 200000
 SaveData = True
@@ -49,7 +49,7 @@ elif(parityCode == "QHypergraph"):
     Ns = [129 * 2]
     NKs = [28]
     lMax = 12
-    allParameters = [[1e-2, 5.9e-3, 3.5e-3, 2.1e-3, 1.2e-3, 7.8e-4, 4.5e-4, 2.7e-4, 1.6e-4, 9.7e-5]]
+    allParameters = [np.array([1e-2, 5.9e-3, 3.5e-3, 2.1e-3, 1.2e-3, 7.8e-4, 4.5e-4, 2.7e-4, 1.6e-4, 9.7e-5])] #[np.arange(1e-2, 5e-2, 7e-3)]
     channelType = 'BSC'
     dataPaths = []
     dataPathsOrtho = []

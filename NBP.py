@@ -10,7 +10,7 @@ tf.config.run_functions_eagerly(True)
 tf.keras.backend.set_floatx('float64')
 
 # Parameters ==============================================================================
-parityCode = "LDPC"
+parityCode = "QHypergraph"
 maxFrameErrorCount = 500
 maxFrames = 200000
 SaveResults = True
@@ -22,7 +22,7 @@ if(parityCode == "LDPC"):
     Ns = [1024]#[256, 1024, 2048, 4096, 8192]
     NKs = [ j // 2 for j in Ns]
     lMax = 50
-    allParameters = [np.array([0.05])]#[np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)]
+    allParameters = [np.array([0.085])]#[np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)]
     channelType = 'BSC' # BSC or AWGN
     dataPaths = []
     modelsPaths = []
@@ -88,20 +88,22 @@ elif(parityCode == "Polar"):
     batchSizeTest = 1000
 #------------------------------------------------------------------------------------------
 elif(parityCode == "QHypergraph"):
-    Ns = [129 * 2]
+    Ns = [129 * 2] #[129]
     NKs = [28]
     lMax = 12
     allParameters = [np.array([1e-2, 5.9e-3, 3.5e-3, 2.1e-3, 1.2e-3, 7.8e-4, 4.5e-4, 2.7e-4, 1.6e-4, 9.7e-5])] #[np.arange(1e-2, 5e-2, 7e-3)]
     channelType = 'BSC'
     dataPaths = []
     dataPathsOrtho = []
+    dataPathsHM = []
     modelsPaths = []
     resultsPaths = []
     for i in range(len(Ns)):
         N = Ns[i]
         NK = NKs[i]
-        dataPaths.append("codesQLDPC\Hypergraph_" + str(N//2) + "_" + str(NK) + ".alist")
-        dataPathsOrtho.append("codesQLDPC\HorthoMatrix_Hypergraph_" + str(N//2) + "_" + str(NK) + ".txt")
+        dataPaths.append("codesQLDPC\Hypergraph_" + str(N//2) + "_" + str(NK) + ".alist") #("codesQLDPC\Hz.alist")
+        dataPathsOrtho.append("codesQLDPC\HOrthoM.txt") #("codesQLDPC\HorthoMatrix_Hypergraph_" + str(N//2) + "_" + str(NK) + ".txt") #("codesQLDPC\Hz.txt")
+        dataPathsHM.append("codesQLDPC\HM.txt")
         modelsPaths.append("Models\\" + str(parityCode) + "_N" + str(N//2) + "_Nk" + str(NK))
         resultsPaths.append("Results\\" + str(parityCode) + "_N"+ str(N//2) + "_NK" + str(NK) + "_NBP_" + str(lMax) + "it_" + str(channelType) + ".txt")
     
@@ -153,9 +155,10 @@ for counter in range(len(Ns)):
     if(parityCode[0] == "Q"):
         IsQuantum = True
         Hortho = np.loadtxt(dataPathsOrtho[counter])
+        HM = np.loadtxt(dataPathsHM[counter])
         if(TRAINDATA):
             LossFunction.SetHOrtho(Hortho)
-    NBPObject = NBPInstance(CodeDescriptor, IsQuantum, lMax, LossFunction, ChannelObject)
+    NBPObject = NBPInstance(CodeDescriptor, IsQuantum, lMax, LossFunction, ChannelObject, HM)
     errorRateTotal = []
 
     # train -------------------------------------------------------------------------
@@ -184,7 +187,10 @@ for counter in range(len(Ns)):
     # loop over all parameters ------------------------------------------------------------
     for parameter in parameters:
         # inititalize
-        NBPObject.ChangeChannelParameters(np.array([parameter]))
+        multiply = 1
+        if(IsQuantum):
+            multiply = 2
+        NBPObject.ChangeChannelParameters(np.array([multiply*parameter]))
         errorCountTotal = 0
         frameCount = 0
         frameErrorCount = 0
@@ -197,15 +203,25 @@ for counter in range(len(Ns)):
             # calculate the error rates ---------------------------------------------------
             # ******************* BLER *******************
             if(IsQuantum):
-                filterData = np.sum(NBPObject.CalculateSyndrome(Edges), axis = 0) > 0
-                filteredDecodedWord = decodedWord.numpy()[:, filterData]
-                filteredChannelOutput = channelOutput[:, filterData]
+                decodedWord = decodedWord.numpy()
+                originalSynd = NBPObject.CalculateSyndromeHM(channelOutput)
+                decodedSynd = NBPObject.CalculateSyndromeHM(decodedWord)
+                filterDataSynd = np.sum(np.abs(originalSynd - decodedSynd), axis=0) > 0
 
-                errorTotal = (filteredDecodedWord + filteredChannelOutput) % 2
-                errorCount = np.sum(np.dot(Hortho, errorTotal) % 2, axis = 0)
-                frameErrorCount += np.sum(1*(errorCount > 0))
+                errorWord = (decodedWord + channelOutput) % 2
+                errorWordFiltered = errorWord[:, np.invert(filterDataSynd)]
+                filterDataHmat = np.sum(np.dot(Hortho, errorWordFiltered) % 2, axis = 0) > 0
+                
+                half = tf.shape(errorWord)[0]//2
+                errorTotalSynd = tf.clip_by_value(errorWord[:half, filterDataSynd] + errorWord[half:, filterDataSynd], clip_value_min=0, clip_value_max=1)
+                errorTotalHmat = tf.clip_by_value(errorWordFiltered[:half, filterDataHmat] + errorWordFiltered[half:, filterDataHmat], clip_value_min=0, clip_value_max=1)
+                errorCountSynd = np.sum(errorTotalSynd, axis = 0)
+                errorCountHmat = np.sum(errorTotalHmat, axis = 0)
+
+                errorCountTotal += (np.sum(errorCountSynd) + np.sum(errorCountHmat))
                 frameCount += batchSizeTest
-                errorRate = frameErrorCount / frameCount
+                frameErrorCount += (np.sum(1*(errorCountSynd > 0)) + np.sum(1*(errorCountHmat > 0)))
+                errorRate = errorCountTotal / (N/2) / frameCount
             # ******************* BER *******************
             else:
                 errorCount = np.sum(decodedWord, axis=0)

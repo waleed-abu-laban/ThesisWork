@@ -31,7 +31,7 @@ class BPInstance:
     def CalculateVMarginals(self):
         sum = self.LLRs + np.sum(self.Edges[np.array(self.vNodes)], axis = 1) # Calculate Variable Belief
         self.Edges[np.array(self.vNodes).flatten()] = np.repeat(sum, self.vNodes.shape[1]) - self.Edges[np.array(self.vNodes).flatten()]
-        self.Edges[-1] = 40 #0
+        self.Edges[-1] = 0
         self.results2.append(copy.deepcopy(sum))
         #ThresholdClip()
         return sum
