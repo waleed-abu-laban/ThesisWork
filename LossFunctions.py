@@ -13,7 +13,7 @@ class LossFunctionNULL(object): # no loss function
 
 class LossFunctionLiu(object): # Liu paper loss function
     def __call__(self, decodedLLRs):
-        return tf.reduce_mean(tf.reduce_sum(self.__AbsSin(tf.tensordot(self.Hortho, tf.expand_dims(self.labels + self.__Fermi(decodedLLRs), -1), axes = 1)), axis = 0)) #/ self.lMax
+        return (tf.reduce_sum(self.__AbsSin(tf.tensordot(self.Hortho, tf.expand_dims(self.labels + self.__Fermi(decodedLLRs), -1), axes = 1)), axis = 0)) #/ self.lMax
     
     def SetLabels(self, channelOutput):
         self.labels = tf.constant(channelOutput, tf.float64)

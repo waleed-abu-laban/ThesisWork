@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 
 class NBPInstance(tf.Module):
-    def __init__(self, CodeDescriptor, IsQuantum, lMax, LossFunctor, Channel, HM):
+    def __init__(self, CodeDescriptor, IsQuantum, lMax, LossFunctor, Channel):
         super().__init__()
         self.EdgesCount = CodeDescriptor.EdgesCount
         self.vNodes = CodeDescriptor.vNodes
@@ -13,7 +13,6 @@ class NBPInstance(tf.Module):
         self.lMax = lMax
         self.LossFunction = LossFunctor
         self.Channel = Channel
-        self.HM = HM
         self.SetSyndrome(tf.zeros((self.vNodes.shape[0], Channel.GetBatchSize())))
         self.weights = tf.ones(shape=(lMax, CodeDescriptor.EdgesCount), dtype=tf.float64)
         self.biases = tf.ones(shape=(lMax, CodeDescriptor.vNodes.shape[0]), dtype=tf.float64)
@@ -30,12 +29,10 @@ class NBPInstance(tf.Module):
 
     def SetSyndrome(self, LLRs):
         self.batchSize = LLRs.shape[1]
-        Edges = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
+        Edges = tf.zeros([self.EdgesCount, LLRs.shape[1]], dtype=tf.float64)
         Edges = self.FillEdges(Edges, LLRs)
-        #self.syndrome = tf.pow(tf.constant(-1, dtype=tf.int64), self.CalculateSyndrome(Edges))
-        syndNP = self.CalculateSyndromeHM(1 * np.array(LLRs < 0))
-        self.syndrome = tf.pow(tf.constant(-1, dtype=tf.int64), tf.constant(syndNP, dtype=tf.int64))
-
+        self.syndrome = tf.pow(tf.constant(-1, dtype=tf.int64), self.CalculateSyndrome(Edges))
+       
     def SetWeightsBiases(self, weights, biases):
         self.weights = weights
         self.biases = biases
@@ -58,7 +55,7 @@ class NBPInstance(tf.Module):
         indicesChange = tf.concat([indexChange, batchIndices], axis = 1)
 
         elementsChange = tf.sparse.reorder(tf.SparseTensor(indicesChange, flatValuesChange, tf.shape(array, out_type=tf.int64)))
-        flatFilteredArray = tf.sparse.to_dense(elementsChange, default_value = 0.)
+        flatFilteredArray = tf.sparse.to_dense(elementsChange, default_value = 0)
         return tf.reshape(flatFilteredArray, tf.shape(array))
 
     def CalculateVMarginals(self, Edges, iteration):
@@ -199,8 +196,10 @@ class NBPInstance(tf.Module):
     def CalculateSyndrome(self, Edges):
         return tf.reduce_sum(tf.cast(tf.gather(Edges, self.cNodes) < 0, tf.int64), axis = 1) % 2
 
-    def CalculateSyndromeHM(self, error):
-        return np.dot(self.HM, error) % 2
+    def CalculateSyndromeError(self, error):
+        Edges = tf.zeros([self.EdgesCount, error.shape[1]], dtype=tf.float64)
+        Edges = self.FillEdges(Edges, error)
+        return tf.reduce_sum(tf.cast(tf.gather(Edges, self.cNodes), tf.int64), axis = 1) % 2
 
     def ContinueCalculation(self, decodedLLRs, Edges, iteration, loss):
         if(iteration == 0):
@@ -212,7 +211,7 @@ class NBPInstance(tf.Module):
                 return False
             return tf.reduce_sum(self.CalculateSyndrome(Edges)) != 0 # isCodeWord other than zero
         else:
-            decodedSynd = self.CalculateSyndromeHM(1 * np.array(decodedLLRs < 0))
+            decodedSynd = self.CalculateSyndrome(Edges)
             originalSynd = 1 * np.array(self.syndrome < 0)
             return np.sum(np.abs(originalSynd - decodedSynd))
 

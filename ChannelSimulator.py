@@ -31,12 +31,13 @@ def CalculateLLRs(y, channelType, parameter = 0, codeRate = 1):
     return LLRs
 
 class Channel(object):
-    def __init__(self, N, batchSize, channelType, parameters, codeRate):
+    def __init__(self, N, batchSize, channelType, parameters, codeRate, isQuantum):
         self.N = N
         self.batchSize = batchSize
         self.channelType = channelType
         self.parameters = parameters
         self.codeRate = codeRate
+        self.isQuantum = isQuantum
 
     def GetBatchSize(self):
         return self.batchSize
@@ -54,6 +55,10 @@ class Channel(object):
         dataShape = data.shape
         if(self.channelType == 'BSC'):
             flipVec = 1*(np.random.rand(dataShape[0], dataShape[1]) <= np.repeat(np.expand_dims(self.parameters, -1), dataShape[1], axis = 1)) # eps = parameter
+            # if(self.isQuantum): # Add the Y error
+            #     flipVecY = 1*(np.random.rand(dataShape[0], dataShape[1]//2) <= np.repeat(np.expand_dims(self.parameters, -1), dataShape[1]//2, axis = 1)) # eps = parameter
+            #     flipVecY = np.tile(flipVecY, 2)
+            #     flipVec = (flipVecY + flipVec) % 2
             data = 1*np.logical_xor(reshapedY, flipVec)
         elif(self.channelType == 'AWGN'):
             # Symbol mapper
@@ -65,7 +70,7 @@ class Channel(object):
             noise = np.random.randn(dataShape[0], dataShape[1]) * np.repeat(np.expand_dims(np.sqrt(noiseVar), -1), dataShape[1], axis = 1)
             # Modulated data
             data = symbols + noise
-        return np.reshape(data, [self.batchSize, self.N]).transpose()
+        return (np.reshape(data, [self.batchSize, self.N]).transpose()).astype(np.int32)
 
     def CalculateLLRsTF(self, y):
         sectionsCount = len(self.parameters)
@@ -82,9 +87,9 @@ class Channel(object):
         return tf.constant(np.reshape(LLRsTemp, [self.batchSize, self.N]).transpose(), dtype=tf.float64)
 
     def GenerateLLRs(self, simulateChannel):
-        channelOutput = np.zeros([self.N, self.batchSize])
+        channelOutput = np.zeros([self.N, self.batchSize], dtype=np.int32)
         if(simulateChannel):
             channelOutput = self.SimulateChannelTF(channelOutput)
-        elif(self.channelType == 'AWGN'):
+        if(self.channelType == 'AWGN'):
             channelOutput = channelOutput * -2 +1
         return self.CalculateLLRsTF(channelOutput), channelOutput
