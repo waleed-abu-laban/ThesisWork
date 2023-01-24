@@ -107,11 +107,11 @@ for counter in range(len(Ns)):
                 # Unflagged
                 errorWord = (decodedWord + channelOutput) % 2
                 errorWordFiltered = errorWord[:, np.invert(filterDataSynd)]
-                logicalOpErrors = np.sum(np.dot(Hortho, errorWord) % 2, axis=0)
+                logicalOpErrors = np.sum(np.dot(Hortho, errorWordFiltered) % 2, axis=0)
                 filterDataHmat = logicalOpErrors > 0
 
                 errorCountTotal += np.sum(np.dot(Hortho, errorWord) % 2)
-                frameErrorCount += np.sum(1*(filterDataHmat))#(np.sum(1*(filterDataSynd)) + np.sum(1*(filterDataHmat)))
+                frameErrorCount += (np.sum(1*(filterDataSynd)) + np.sum(1*(filterDataHmat)))
                 errorRate = frameErrorCount / frameCount
             # ******************* BER *******************
             else:
