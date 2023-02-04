@@ -12,12 +12,12 @@ tf.keras.backend.set_floatx('float64')
 
 # Parameters ==============================================================================
 parityCode = "QHypergraph"
-maxFrameErrorCount = 500
+maxFrameErrorCount = 1000
 maxFrames = 2000000
 SaveResults = True
 #------------------------------------------------------------------------------------------
 TRAINDATA = False
-TESTDATA = False
+TESTDATA = True
 #------------------------------------------------------------------------------------------
 iniDescriptor = CodeInitialization(parityCode)
 Ns = iniDescriptor.Ns
@@ -58,8 +58,8 @@ for counter in range(len(Ns)):
 
     # train -------------------------------------------------------------------------
     if(TRAINDATA):
-        weights = tf.Variable(initializer(shape=(lMax, CodeDescriptor.EdgesCount)), dtype=tf.float64, trainable=True)
-        biases = tf.Variable(initializer(shape=(lMax, N)), dtype=tf.float64, trainable=True)
+        weights = tf.Variable(initializer(shape=(1, CodeDescriptor.EdgesCount)), dtype=tf.float64, trainable=True)
+        biases = tf.Variable(initializer(shape=(1, N)), dtype=tf.float64, trainable=True)
         NBPObject.SetWeightsBiases(weights, biases)
 
         losses = tfp.math.minimize(NBPObject.TrainNBP,
@@ -111,8 +111,10 @@ for counter in range(len(Ns)):
                 filterDataHmat = logicalOpErrors > 0
 
                 errorCountTotal += np.sum(np.dot(Hortho, errorWord) % 2)
-                frameErrorCount += (np.sum(1*(filterDataSynd)) + np.sum(1*(filterDataHmat)))
+                test = np.sum(errorWord, axis=0)
+                frameErrorCount += (np.sum(1*(filterDataSynd)) + np.sum(1*(filterDataHmat))) #np.sum(1*(test > 0)) #
                 errorRate = frameErrorCount / frameCount
+                #errorRate = errorCountTotal/ 56 / frameCount
             # ******************* BER *******************
             else:
                 errorCount = np.sum(decodedWord, axis=0)

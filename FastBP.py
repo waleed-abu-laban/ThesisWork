@@ -2,78 +2,30 @@ import numpy as np
 from BeliefPropagation import BPInstance
 from DataReader import ReadData
 from ChannelSimulator import SimulateChannel, CalculateLLRs
+from Initialization import CodeInitialization
 
 # Parameters ==============================================================================
-parityCode = "QHypergraph"
+parityCode = "Hypergraph"
 maxFrameErrorCount = 500
 maxFrames = 200000
 SaveData = True
 #------------------------------------------------------------------------------------------
-if(parityCode == "LDPC"):
-    Ns = [1024]#[256, 1024, 2048, 4096, 8192]
-    NKs = [ j // 2 for j in Ns]
-    lMax = 50
-    allParameters = [np.array([0.35])]#[np.arange(0.5, 5.1, 0.25), np.arange(0.5, 3.3, 0.4), np.arange(0.5, 2.9, 0.3), np.arange(0.5, 2.3, 0.2), np.arange(0.5, 2.3, 0.2)]
-    channelType = 'BSC' # BSC or AWGN
-    dataPaths = []
-    for i in range(len(Ns)):
-        N = Ns[i]
-        NK = NKs[i]
-        dataPaths.append("codesLDPC\ldpc_h_reg_dv3_dc6_N" + str(N) + "_Nk" + str(NK))
-#------------------------------------------------------------------------------------------
-elif(parityCode == "BCH"):
-    Ns = [63]
-    NKs = [45]
-    lMax = 5
-    allParameters = [np.array([6])]#[np.arange(1,7)]
-    channelType = 'AWGN'
-    dataPaths = []
-    for i in range(len(Ns)):
-        N = Ns[i]
-        NK = NKs[i]
-        dataPaths.append("codesHDPC\BCH_" + str(N) + "_" + str(NK) + ".alist")
-#------------------------------------------------------------------------------------------
-elif(parityCode == "Polar"):
-    Ns = [128]
-    NKs = [64]
-    lMax = 12
-    allParameters = [np.arange(1,7)]
-    channelType = 'AWGN'
-    dataPaths = []
-    for i in range(len(Ns)):
-        N = Ns[i]
-        NK = NKs[i]
-        dataPaths.append("codesHDPC\polar_" + str(N) + "_" + str(NK) + ".alist")
-#------------------------------------------------------------------------------------------
-elif(parityCode == "QHypergraph"):
-    Ns = [129 * 2]
-    NKs = [28]
-    lMax = 12
-    allParameters = [np.array([1e-2, 5.9e-3, 3.5e-3, 2.1e-3, 1.2e-3, 7.8e-4, 4.5e-4, 2.7e-4, 1.6e-4, 9.7e-5])] #[np.arange(1e-2, 5e-2, 7e-3)]
-    channelType = 'BSC'
-    dataPaths = []
-    dataPathsOrtho = []
-    for i in range(len(Ns)):
-        N = Ns[i]
-        NK = NKs[i]
-        dataPaths.append("codesQLDPC\Hypergraph_" + str(N//2) + "_" + str(NK) + ".alist")
-        dataPathsOrtho.append("codesQLDPC\HorthoMatrix_Hypergraph_" + str(N//2) + "_" + str(NK) + ".txt")
-#------------------------------------------------------------------------------------------
-else: # QBicycle
-    Ns = [256 * 2]
-    NKs = [32]
-    lMax = 12
-    allParameters = [[1e-2, 3e-3, 1e-3, 3e-4, 1e-4]]
-    channelType = 'BSC'
-    dataPaths = []
-    dataPathsOrtho = []
-    for i in range(len(Ns)):
-        N = Ns[i]
-        NK = NKs[i]
-        dataPaths.append("codesQLDPC\Bicycle_" + str(N//2) + "_" + str(NK) + ".alist")
-        dataPathsOrtho.append("codesQLDPC\HorthoMatrix_Bicycle_" + str(N//2) + "_" + str(NK) + ".txt")
-#------------------------------------------------------------------------------------------
-
+iniDescriptor = CodeInitialization(parityCode)
+Ns = iniDescriptor.Ns
+NKs = iniDescriptor.NKs
+lMax = iniDescriptor.lMax
+allParameters = iniDescriptor.allParameters
+channelType = iniDescriptor.channelType
+dataPaths = iniDescriptor.dataPaths
+dataPathsOrtho = iniDescriptor.dataPathsOrtho
+modelsPaths = iniDescriptor.modelsPaths
+resultsPaths = iniDescriptor.resultsPaths
+LossFunction = iniDescriptor.LossFunction
+initializer = iniDescriptor.initializer
+batchSizeTrain = iniDescriptor.batchSizeTrain
+learningRate = iniDescriptor.learningRate
+epochs = iniDescriptor.epochs
+batchSizeTest = iniDescriptor.batchSizeTest
 # Simulation ==============================================================================
 for counter in range(len(Ns)):
     # inititalize -------------------------------------------------------------------------
@@ -138,6 +90,7 @@ for counter in range(len(Ns)):
                 frameErrorCount += (1*(errorCount > 0))
                 frameCount += 1
                 errorRate = errorCountTotal / N / frameCount
+                errorRate = frameErrorCount / frameCount
 
             # print the data to keep track -------------------------------------------------
             if(frameCount % 100 == 0):

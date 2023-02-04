@@ -100,7 +100,7 @@ class BPInstance:
         self.results2 = []
         decodedLLRs = self.CalculateVMarginals() # Initialize
         for _ in range(lMax):
-            self.CalculateCMarginals() # Check nodes
+            self.CalculateCMarginalsBoxPlus() # Check nodes
             decodedLLRs = self.CalculateVMarginals() # Variable nodes
             if(self.IsCodeWord()):
                 break

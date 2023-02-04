@@ -83,7 +83,6 @@ def CodeInitialization(parityCode):
         channelType = 'BSC'
         dataPaths = []
         dataPathsOrtho = []
-        dataPathsHM = []
         modelsPaths = []
         resultsPaths = []
         for i in range(len(Ns)):
@@ -91,7 +90,6 @@ def CodeInitialization(parityCode):
             NK = NKs[i]
             dataPaths.append("codesQLDPC\H_Shor.alist")
             dataPathsOrtho.append("codesQLDPC\HOrthoM_Shor.txt")
-            dataPathsHM.append("codesQLDPC\H_Shor.txt")
             modelsPaths.append("Models\\" + str(parityCode) + "_N" + str(N//2) + "_Nk" + str(NK))
             resultsPaths.append("Results\\" + str(parityCode) + "_N"+ str(N//2) + "_NK" + str(NK) + "_NBP_" + str(lMax) + "it_" + str(channelType) + ".txt")
         
@@ -131,27 +129,25 @@ def CodeInitialization(parityCode):
         Ns = [129 * 2] #[129]
         NKs = [28]
         lMax = 12
-        allParameters = [np.array([1e-2, 8e-3, 6e-3, 4e-3, 2e-3, 1e-3, 8e-4, 6e-4, 4e-4])] #[np.array([1e-2, 5.9e-3, 3.5e-3, 2.1e-3, 1.2e-3, 7.8e-4, 4.5e-4, 2.7e-4, 1.6e-4, 9.7e-5])] #[np.arange(1e-2, 5e-2, 7e-3)]
+        allParameters = [np.array([1e-2, 8e-3, 6e-3, 4e-3, 2e-3, 1e-3, 8e-4, 6e-4, 4e-4])] #[np.linspace(0.01, 0.05, 6)] #[np.array([1e-2, 8e-3, 6e-3, 4e-3, 2e-3, 1e-3, 8e-4, 6e-4, 4e-4])] #[np.array([1e-2, 5.9e-3, 3.5e-3, 2.1e-3, 1.2e-3, 7.8e-4, 4.5e-4, 2.7e-4, 1.6e-4, 9.7e-5])] #[np.arange(1e-2, 5e-2, 7e-3)]
         channelType = 'BSC'
         dataPaths = []
         dataPathsOrtho = []
-        dataPathsHM = []
         modelsPaths = []
         resultsPaths = []
         for i in range(len(Ns)):
             N = Ns[i]
             NK = NKs[i]
-            dataPaths.append ("codesQLDPC\Hypergraph_" + str(N//2) + "_" + str(NK) + ".alist") #("codesQLDPC\H_new.alist")
-            dataPathsOrtho.append("codesQLDPC\HorthoMatrix_Hypergraph_" + str(N//2) + "_" + str(NK) + ".txt") #("codesQLDPC\Hortho_new.txt") #("codesQLDPC\Hz.txt")
-            dataPathsHM.append("codesQLDPC\H_new.txt")
+            dataPaths.append("codesQLDPC\Hypergraph_" + str(N//2) + "_" + str(NK) + ".alist") #("codesQLDPC\H_new.alist")
+            dataPathsOrtho.append("codesQLDPC\HorthoMatrix_Hypergraph_" + str(N//2) + "_" + str(NK) + ".txt") #("codesQLDPC\Hortho_new.txt") #("codesQLDPC\Hz.txt") ("codesQLDPC\logicalWords.txt")#
             modelsPaths.append("Models\\" + str(parityCode) + "_N" + str(N//2) + "_Nk" + str(NK))
             resultsPaths.append("Results\\" + str(parityCode) + "_N"+ str(N//2) + "_NK" + str(NK) + "_NBP_" + str(lMax) + "it_" + str(channelType) + ".txt")
         
         LossFunction = lf.LossFunctionLiu()
-        initializer = tf.keras.initializers.TruncatedNormal(mean=1.0, stddev=1.0, seed=1)
-        batchSizeTrain = 120
+        initializer = tf.keras.initializers.TruncatedNormal(mean=0.0, stddev=0.5, seed=1)
+        batchSizeTrain = allParameters[0].size * 20
         learningRate = 0.0001
-        epochs = 10001
+        epochs = 1001
         batchSizeTest = 100
     #------------------------------------------------------------------------------------------
 
@@ -162,7 +158,6 @@ def CodeInitialization(parityCode):
     iniDescriptor.channelType = channelType
     iniDescriptor.dataPaths = dataPaths
     iniDescriptor.dataPathsOrtho = dataPathsOrtho
-    iniDescriptor.dataPathsHM = dataPathsHM
     iniDescriptor.modelsPaths = modelsPaths
     iniDescriptor.resultsPaths = resultsPaths
     iniDescriptor.LossFunction = LossFunction

@@ -59,14 +59,18 @@ class NBPInstance(tf.Module):
         return tf.reshape(flatFilteredArray, tf.shape(array))
 
     def CalculateVMarginals(self, Edges, iteration):
-        weightsIt = tf.tile(tf.reshape(self.weights[iteration], [-1, 1]), [1, self.batchSize])
-        biasesIt = tf.tile(tf.reshape(self.biases[iteration], [-1, 1]), [1, self.batchSize])
+        weightsIt = tf.tile(tf.reshape(self.weights[0], [-1, 1]), [1, self.batchSize])
+        biasesIt = tf.tile(tf.reshape(self.biases[0], [-1, 1]), [1, self.batchSize])
         weightedEdges =  tf.gather(Edges, self.vNodes) * tf.gather(weightsIt, self.vNodes)
         biasedLLRs = self.LLRs * biasesIt
         sum = biasedLLRs + tf.reduce_sum(weightedEdges, axis = 1) # Calculate Variable Belief
         flatIndices = tf.reshape(self.vNodes, [-1])
         newValues =  tf.repeat(sum, repeats=self.vDegrees, axis = 0) - tf.gather(Edges, flatIndices) * tf.gather(weightsIt, flatIndices) 
         Edges = self.IndexFilter(Edges, flatIndices, newValues)
+
+        condition = tf.cast(tf.logical_not(tf.cast(self.decimationMask, bool)), tf.float64)
+        Edges = Edges * condition + self.decimationMask
+
         Edges = tf.clip_by_value(Edges, clip_value_min=-100, clip_value_max=100)
         return Edges, sum
 
@@ -187,11 +191,11 @@ class NBPInstance(tf.Module):
         atanhValues = 2*tf.atanh(finalProdFlat)
         flatIndices = tf.reshape(self.cNodes, [-1])
         Edges = self.IndexFilter(Edges, flatIndices, atanhValues)
-        Edges = tf.clip_by_value(Edges, clip_value_min=-100, clip_value_max=100)
 
-        flatIndices = tf.reshape(self.cNodes, [-1])
         newValues = tf.gather(Edges, flatIndices) * tf.cast(tf.repeat(self.syndrome, repeats=self.cDegrees, axis = 0), dtype=tf.float64)
-        return self.IndexFilter(Edges, flatIndices, newValues)
+        Edges = self.IndexFilter(Edges, flatIndices, newValues)
+        Edges = tf.clip_by_value(Edges, clip_value_min=-100, clip_value_max=100)
+        return Edges
 
     def CalculateSyndrome(self, Edges):
         return tf.reduce_sum(tf.cast(tf.gather(Edges, self.cNodes) < 0, tf.int64), axis = 1) % 2
@@ -218,14 +222,37 @@ class NBPInstance(tf.Module):
     def BeliefPropagationIt(self, decodedLLRs, Edges, iteration, loss):
         Edges = self.CalculateCMarginals(Edges) # Check nodes
         Edges, decodedLLRs = self.CalculateVMarginals(Edges, iteration) # Variable nodes
-        loss += self.LossFunction(decodedLLRs)
+        #loss += self.LossFunction(decodedLLRs)
         iteration += 1
         return decodedLLRs, Edges, iteration, loss
+
+    def DecimateNodes(self, decodedLLRs, CNMask):
+        Edges = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
+        Edges = self.FillEdges(Edges, decodedLLRs)
+
+        qBitValue = self.Channel.CalculateSingleLLRTF(0)
+        for i in range(self.batchSize):
+            filteredNodes = tf.ragged.boolean_mask(self.cNodes, CNMask[:, i])
+            checkNodeIndex = tf.argmax(tf.reduce_mean(tf.gather(Edges[:, i], filteredNodes), axis = 1), axis=0)
+            CNMask = tf.tensor_scatter_nd_update(CNMask, [[checkNodeIndex, i]], [False])
+
+            treeIndex = tf.constant(i, dtype=tf.int64)
+            connectedVNodes = self.cNodes[checkNodeIndex, :]
+            VNodeIndex = tf.where(tf.equal(connectedVNodes[0], self.vNodes))[0][0]
+            connectedCNodes = self.vNodes[VNodeIndex, :]
+
+            repeatedTreeIndex = tf.repeat(treeIndex, repeats=connectedCNodes.shape[0])
+            repeatedCNodeValue = tf.repeat(qBitValue, repeats=connectedCNodes.shape[0])
+            finalIndices = tf.stack([connectedCNodes, repeatedTreeIndex], axis=1)
+            self.decimationMask = tf.tensor_scatter_nd_update(self.decimationMask, finalIndices, repeatedCNodeValue)
+        return CNMask
 
     def TrainNBP(self):
         self.GenerateCodeWords()
         EdgesIni = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
         EdgesIni = self.FillEdges(EdgesIni, self.LLRs)
+        self.decimationMask = tf.zeros_like(EdgesIni)
+
         # parameters: [decodedLLRs, iteration, loss]
         decodedLLRs, Edges, iteration, loss = \
                             tf.while_loop(\
@@ -235,7 +262,7 @@ class NBPInstance(tf.Module):
                             EdgesIni,\
                             tf.constant(0,dtype=tf.int32),\
                             tf.constant(0.0, dtype=tf.float64)])
-        totalLoss = loss/tf.cast(iteration, tf.float64)
+        totalLoss = self.LossFunction(decodedLLRs) #loss/tf.cast(iteration, tf.float64)
         tf.print(totalLoss)
         return totalLoss
 
@@ -243,6 +270,7 @@ class NBPInstance(tf.Module):
         channelOutput = self.GenerateCodeWords()
         EdgesIni = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
         EdgesIni = self.FillEdges(EdgesIni, self.LLRs)
+        self.decimationMask = tf.zeros_like(EdgesIni)
 
         # parameters: [decodedLLRs, iteration, loss]
         decodedLLRs, Edges, iteration, loss = \
@@ -257,6 +285,49 @@ class NBPInstance(tf.Module):
     
         return Edges, tf.cast(decodedLLRs < 0, tf.int64), channelOutput
 
+    def DecimatedBeliefPropagation(self):
+        channelOutput = self.GenerateCodeWords()
+        NumberOfDecimatedNodes = 1
+        lMaxTemp = self.lMax
+        self.decimationMask = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
+
+        for i in range(NumberOfDecimatedNodes) :
+            EdgesIni = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
+            EdgesIni = self.FillEdges(EdgesIni, self.LLRs)
+            if(i == 0):
+                self.decimationMask = tf.zeros_like(EdgesIni)
+                CNMask = tf.cast(tf.ones([self.cNodes.shape[0], self.batchSize]), bool)
+
+            # parameters: [decodedLLRs, iteration, loss]
+            decodedLLRs, Edges, iteration, loss = \
+                tf.nest.map_structure(tf.stop_gradient,\
+                                tf.while_loop(\
+                                self.ContinueCalculation,\
+                                self.BeliefPropagationIt,\
+                                [tf.ones([self.vNodes.shape[0], self.batchSize], dtype=tf.float64) * -1,\
+                                EdgesIni,\
+                                tf.constant(0,dtype=tf.int32),\
+                                tf.constant(0.0, dtype=tf.float64)]))
+        
+            CNMask = self.DecimateNodes(decodedLLRs, CNMask)
+
+        self.lMax = lMaxTemp
+        EdgesIni = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
+        EdgesIni = self.FillEdges(EdgesIni, self.LLRs)
+
+        # parameters: [decodedLLRs, iteration, loss]
+        decodedLLRs, Edges, iteration, loss = \
+            tf.nest.map_structure(tf.stop_gradient,\
+                            tf.while_loop(\
+                            self.ContinueCalculation,\
+                            self.BeliefPropagationIt,\
+                            [tf.ones([self.vNodes.shape[0], self.batchSize], dtype=tf.float64) * -1,\
+                            EdgesIni,\
+                            tf.constant(0,dtype=tf.int32),\
+                            tf.constant(0.0, dtype=tf.float64)]))
+
+        return Edges, tf.cast(decodedLLRs < 0, tf.int64), channelOutput
+
     def GenerateCodeWords(self):
         LLRs, channelOutput = self.Channel.GenerateLLRs(True)
         self.LossFunction.SetLabels(channelOutput)
@@ -267,4 +338,24 @@ class NBPInstance(tf.Module):
 
         self.SetLLRs(LLRs)
         return channelOutput
-            
+
+    # def DecimateNodes(self, decodedLLRs, CNMask):
+    #     Edges = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
+    #     Edges = self.FillEdges(Edges, decodedLLRs)
+
+    #     qBitValue = self.Channel.CalculateSingleLLRTF(0)
+    #     for i in range(self.batchSize):
+    #         filteredNodes = tf.ragged.boolean_mask(self.cNodes, CNMask[:, i])
+    #         checkNodeIndex = tf.argmax(tf.reduce_mean(tf.gather(Edges[:, i], filteredNodes), axis = 1), axis=0)
+    #         CNMask = tf.tensor_scatter_nd_update(CNMask, [[checkNodeIndex, i]], [False])
+
+    #         treeIndex = tf.constant(i, dtype=tf.int64)
+    #         connectedVNodes = self.cNodes[checkNodeIndex, :]
+    #         VNodeIndex = tf.where(tf.equal(connectedVNodes[0], self.vNodes))[0][0]
+    #         connectedCNodes = self.vNodes[VNodeIndex, :]
+
+    #         repeatedTreeIndex = tf.repeat(treeIndex, repeats=connectedCNodes.shape[0])
+    #         repeatedCNodeValue = tf.repeat(qBitValue, repeats=connectedCNodes.shape[0])
+    #         finalIndices = tf.stack([connectedCNodes, repeatedTreeIndex], axis=1)
+    #         self.decimationMask = tf.tensor_scatter_nd_update(self.decimationMask, finalIndices, repeatedCNodeValue)
+    #     return CNMask

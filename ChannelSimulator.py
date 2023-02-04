@@ -86,6 +86,17 @@ class Channel(object):
             LLRsTemp = reshapedY*2 / np.repeat(np.expand_dims(np.sqrt(noiseVar), -1), reshapedY.shape[1], axis = 1)
         return tf.constant(np.reshape(LLRsTemp, [self.batchSize, self.N]).transpose(), dtype=tf.float64)
 
+    def CalculateSingleLLRTF(self, y):
+        if(self.channelType == 'BSC'):
+            y1LLR = np.log(np.array(self.parameters)) - np.log(1-np.array(self.parameters)) # eps = parameter
+            LLR = (y*2-1) * y1LLR 
+        elif(self.channelType == 'AWGN'):
+            EbN0 = 10**(self.parameters/10) # EbN0dB = parameter
+            No = 1/(EbN0 * self.codeRate)
+            noiseVar = No/2
+            LLR = y*2 / np.sqrt(noiseVar)
+        return LLR
+
     def GenerateLLRs(self, simulateChannel):
         channelOutput = np.zeros([self.N, self.batchSize], dtype=np.int32)
         if(simulateChannel):

@@ -29,13 +29,13 @@ class LossFunctionLiu(object): # Liu paper loss function
 
 class LossFunctionCE(object): # Cross Entropy loss function
     def __call__(self, decodedLLRs):
-        return tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=-decodedLLRs, labels=self.labels)) #/ lMax
+        return tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=-decodedLLRs, labels=self.labels), axis=0) #/ lMax
         
     def SetHOrtho(self, Hortho):
         None
 
     def SetLabels(self, channelOutput):
-        self.labels = tf.zeros_like(channelOutput, tf.float64)
+        self.labels = tf.constant(channelOutput, tf.float64)
 
 
 
