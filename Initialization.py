@@ -6,6 +6,8 @@ class iniDescriptor:
 	def __init__(self):
             None
 def CodeInitialization(parityCode):
+    generatorMatrixPaths = []
+    dataPathsOrtho = []
     if(parityCode == "LDPC"):
         Ns = [1024]#[256, 1024, 2048, 4096, 8192]
         NKs = [ j // 2 for j in Ns]
@@ -30,26 +32,27 @@ def CodeInitialization(parityCode):
         batchSizeTest = 100
     #------------------------------------------------------------------------------------------
     elif(parityCode == "BCH"):
-        Ns = [63]
-        NKs = [45]
+        Ns = [63]#[15]
+        NKs = [45]#[11]
         lMax = 5
-        allParameters = [np.arange(1,7)]
-        channelType = 'AWGN'
+        allParameters = [np.arange(1,7)] # [np.array([0.001])] #
+        channelType = 'AWGN' # BSC or AWGN
         dataPaths = []
         modelsPaths = []
         resultsPaths = []
+        generatorMatrixPaths = []
         for i in range(len(Ns)):
             N = Ns[i]
             NK = NKs[i]
             dataPaths.append("codesHDPC\BCH_" + str(N) + "_" + str(NK) + ".alist")
             modelsPaths.append("Models\\" + str(parityCode) + "_N" + str(N) + "_Nk" + str(NK))
             resultsPaths.append("Results\\" + str(parityCode) + "_N"+ str(N) + "_NK" + str(NK) + "_NBP_" + str(lMax) + "it_" + str(channelType) + ".txt")
-        
+            generatorMatrixPaths.append("codesHDPC\GBCH_" + str(N) + "_" + str(NK) + ".txt")
         LossFunction = lf.LossFunctionCE()
         initializer = tf.keras.initializers.TruncatedNormal(mean=0.7, stddev=0.5, seed=1)
         batchSizeTrain = 120
         learningRate = 0.001
-        epochs = 10001
+        epochs = 5001
         batchSizeTest = 1000
     #------------------------------------------------------------------------------------------
     elif(parityCode == "Polar"):
@@ -140,14 +143,17 @@ def CodeInitialization(parityCode):
             NK = NKs[i]
             dataPaths.append("codesQLDPC\Hypergraph_" + str(N//2) + "_" + str(NK) + ".alist") #("codesQLDPC\H_new.alist")
             dataPathsOrtho.append("codesQLDPC\HorthoMatrix_Hypergraph_" + str(N//2) + "_" + str(NK) + ".txt") #("codesQLDPC\Hortho_new.txt") #("codesQLDPC\Hz.txt") ("codesQLDPC\logicalWords.txt")#
-            modelsPaths.append("Models\\" + str(parityCode) + "_N" + str(N//2) + "_Nk" + str(NK))
+            modelsPaths.append("Models\\QHypergraph_N129_Nk28_BCE10^3Ones")#("Models\\" + str(parityCode) + "_N" + str(N//2) + "_Nk" + str(NK))
             resultsPaths.append("Results\\" + str(parityCode) + "_N"+ str(N//2) + "_NK" + str(NK) + "_NBP_" + str(lMax) + "it_" + str(channelType) + ".txt")
         
-        LossFunction = lf.LossFunctionLiu()
-        initializer = tf.keras.initializers.TruncatedNormal(mean=0.0, stddev=0.5, seed=1)
+        generatorMatrixPaths.append("codesQLDPC\Lx.txt")
+        generatorMatrixPaths.append("codesQLDPC\Lz.txt")
+
+        LossFunction = lf.LossFunctionLiu() #  LossFunctionLiu
+        initializer = tf.keras.initializers.TruncatedNormal(mean=0.7, stddev=0.5, seed=1) #(mean=0.0, stddev=0.5, seed=1)
         batchSizeTrain = allParameters[0].size * 20
-        learningRate = 0.0001
-        epochs = 1001
+        learningRate = 0.001
+        epochs = 1000
         batchSizeTest = 100
     #------------------------------------------------------------------------------------------
 
@@ -166,5 +172,6 @@ def CodeInitialization(parityCode):
     iniDescriptor.learningRate = learningRate
     iniDescriptor.epochs = epochs
     iniDescriptor.batchSizeTest = batchSizeTest
+    iniDescriptor.generatorMatrixPaths = generatorMatrixPaths
     return iniDescriptor
         

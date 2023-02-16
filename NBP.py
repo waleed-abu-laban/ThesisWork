@@ -15,6 +15,8 @@ parityCode = "QHypergraph"
 maxFrameErrorCount = 1000
 maxFrames = 2000000
 SaveResults = True
+isZeroCodeWord = True # Generator matrix should be provided if False
+isSyndromeBased = False # Will be True anyway for Quantum case
 #------------------------------------------------------------------------------------------
 TRAINDATA = False
 TESTDATA = True
@@ -35,6 +37,7 @@ batchSizeTrain = iniDescriptor.batchSizeTrain
 learningRate = iniDescriptor.learningRate
 epochs = iniDescriptor.epochs
 batchSizeTest = iniDescriptor.batchSizeTest
+generatorMatrixPaths = iniDescriptor.generatorMatrixPaths
 
 # Simulation ==============================================================================
 for counter in range(len(Ns)):
@@ -45,21 +48,27 @@ for counter in range(len(Ns)):
     dataPath = dataPaths[counter]
     modelPath = modelsPaths[counter]
     resultPath = resultsPaths[counter]
+    if(isZeroCodeWord):
+        generatorMatrix = np.zeros((NK, N))
+    else:
+        generatorMatrix = np.loadtxt(generatorMatrixPaths[counter])
     CodeDescriptor = ReadDataTF(dataPath, parityCode)
     IsQuantum = False
     if(parityCode[0] == "Q"):
         IsQuantum = True
+        isSyndromeBased = True
         Hortho = np.loadtxt(dataPathsOrtho[counter])
         if(TRAINDATA):
             LossFunction.SetHOrtho(Hortho)
-    ChannelObject = Channel(N, batchSizeTrain, channelType, parameters, NK / N, IsQuantum)
-    NBPObject = NBPInstance(CodeDescriptor, IsQuantum, lMax, LossFunction, ChannelObject)
+    ChannelObject = Channel(N, batchSizeTrain, channelType, parameters, NK / N, IsQuantum, generatorMatrix)
+    NBPObject = NBPInstance(CodeDescriptor, isSyndromeBased, lMax, LossFunction, ChannelObject)
     errorRateTotal = []
 
     # train -------------------------------------------------------------------------
     if(TRAINDATA):
-        weights = tf.Variable(initializer(shape=(1, CodeDescriptor.EdgesCount)), dtype=tf.float64, trainable=True)
-        biases = tf.Variable(initializer(shape=(1, N)), dtype=tf.float64, trainable=True)
+        weights = tf.Variable(initializer(shape=(lMax, CodeDescriptor.EdgesCount)), dtype=tf.float64, trainable=True)
+        biases =  tf.Variable(tf.ones((lMax, N), dtype=tf.float64), dtype=tf.float64, trainable=True) # tf.Variable(initializer(shape=(lMax, N)), dtype=tf.float64, trainable=True) #
+
         NBPObject.SetWeightsBiases(weights, biases)
 
         losses = tfp.math.minimize(NBPObject.TrainNBP,
@@ -86,42 +95,63 @@ for counter in range(len(Ns)):
         errorCountTotal = 0
         frameCount = 0
         frameErrorCount = 0
+        bp_success_count = 0
         # check if the processed data is within the test limits
         while((frameErrorCount < maxFrameErrorCount) and (frameCount < maxFrames)):
 
              # run NBP algorithm
-            Edges, decodedWord, channelOutput = NBPObject.NeuralBeliefPropagationOp()
-            
+            Edges, decodedWord, channelOutput, channelInput = NBPObject.NeuralBeliefPropagationOp()
+
             # calculate the error rates ---------------------------------------------------
-            # ******************* BLER *******************
+            # ******************* Quantum *******************
             if(IsQuantum):
                 decodedWord = decodedWord.numpy()
                 frameCount += batchSizeTest
+                if(True):
+                    # Flagged
+                    filterDataSynd = np.logical_not(NBPObject.terminated)
 
-                # Flagged
-                originalSynd = NBPObject.CalculateSyndromeError(channelOutput)
-                decodedSynd = NBPObject.CalculateSyndromeError(decodedWord)
-                syndErrors = np.sum(np.abs(originalSynd - decodedSynd), axis=0)
-                filterDataSynd = syndErrors > 0
+                    # Unflagged
+                    errorWord = (decodedWord + channelOutput) % 2
+                    errorWordFiltered = errorWord[:, NBPObject.terminated]
+                    logicalOpErrors = np.sum(Hortho @ errorWordFiltered % 2, axis=0)
+                    filterDataHmat = logicalOpErrors > 0
+                    
+                    errorCountTotal += np.sum(np.dot(Hortho, errorWord) % 2)
+                    frameErrorCount += (np.sum(1*(filterDataSynd)) + np.sum(1*(filterDataHmat))) #np.sum(1*(test > 0)) #
+                    errorRate = frameErrorCount / frameCount
+                else:
+                    lx = np.loadtxt(generatorMatrixPaths[0])
+                    lz = np.loadtxt(generatorMatrixPaths[1])
 
-                # Unflagged
-                errorWord = (decodedWord + channelOutput) % 2
-                errorWordFiltered = errorWord[:, np.invert(filterDataSynd)]
-                logicalOpErrors = np.sum(np.dot(Hortho, errorWordFiltered) % 2, axis=0)
-                filterDataHmat = logicalOpErrors > 0
+                    half = decodedWord.shape[0] // 2
+                    ex = decodedWord[half:, :]
+                    ez = decodedWord[:half, :]
 
-                errorCountTotal += np.sum(np.dot(Hortho, errorWord) % 2)
-                test = np.sum(errorWord, axis=0)
-                frameErrorCount += (np.sum(1*(filterDataSynd)) + np.sum(1*(filterDataHmat))) #np.sum(1*(test > 0)) #
-                errorRate = frameErrorCount / frameCount
-                #errorRate = errorCountTotal/ 56 / frameCount
-            # ******************* BER *******************
+                    residual_x = (ex + channelOutput[half:, :]) % 2
+                    residual_z = (ez + channelOutput[:half, :]) % 2
+
+                    failx = np.sum(lz@residual_x % 2, axis=0) > 0
+                    failz = np.sum(lx@residual_z % 2, axis=0) > 0
+                    bp_success_count += np.sum(1*np.logical_not(np.logical_or(failx, failz)))
+
+                    errorRate = 1-bp_success_count/frameCount
+
+                    #errorRate = 1.0 - (1-bp_logical_error_rate)**(1/28)
+            # ******************* Classical *******************
             else:
-                errorCount = np.sum(decodedWord, axis=0)
+                if(isSyndromeBased):
+                    errorWord = (decodedWord + channelOutput + channelInput) % 2
+                else:
+                    errorWord = (decodedWord + channelInput) % 2
+                errorCount = np.sum(errorWord, axis=0)
                 errorCountTotal += np.sum(errorCount)
                 frameCount += batchSizeTest
                 frameErrorCount += np.sum(1*(errorCount > 0))
-                errorRate = errorCountTotal / N / frameCount
+                if(isSyndromeBased):
+                    errorRate = frameErrorCount / frameCount
+                else:
+                    errorRate = errorCountTotal / N / frameCount
 
             # print the data to keep track -------------------------------------------------
             print(N, parameter, frameCount, errorRate, frameErrorCount)

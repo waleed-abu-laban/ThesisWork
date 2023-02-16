@@ -31,13 +31,15 @@ def CalculateLLRs(y, channelType, parameter = 0, codeRate = 1):
     return LLRs
 
 class Channel(object):
-    def __init__(self, N, batchSize, channelType, parameters, codeRate, isQuantum):
+    def __init__(self, N, batchSize, channelType, parameters, codeRate, isQuantum, generatorMatrix):
         self.N = N
         self.batchSize = batchSize
         self.channelType = channelType
         self.parameters = parameters
         self.codeRate = codeRate
         self.isQuantum = isQuantum
+        self.generatorMatrix = generatorMatrix
+        np.random.seed(100)
 
     def GetBatchSize(self):
         return self.batchSize
@@ -50,7 +52,7 @@ class Channel(object):
 
     def SimulateChannelTF(self, y):
         sectionsCount = len(self.parameters)
-        reshapedY = np.reshape(y, [sectionsCount, self.batchSize * self.N // sectionsCount])
+        reshapedY = np.reshape(y, [sectionsCount, self.batchSize * self.N // sectionsCount], order='F')
         data = 0 * reshapedY
         dataShape = data.shape
         if(self.channelType == 'BSC'):
@@ -70,7 +72,7 @@ class Channel(object):
             noise = np.random.randn(dataShape[0], dataShape[1]) * np.repeat(np.expand_dims(np.sqrt(noiseVar), -1), dataShape[1], axis = 1)
             # Modulated data
             data = symbols + noise
-        return (np.reshape(data, [self.batchSize, self.N]).transpose()).astype(np.int32)
+        return np.reshape(data, [self.batchSize, self.N]).transpose()
 
     def CalculateLLRsTF(self, y):
         sectionsCount = len(self.parameters)
@@ -83,7 +85,7 @@ class Channel(object):
             EbN0 = 10**(self.parameters/10) # EbN0dB = parameter
             No = 1/(EbN0 * self.codeRate)
             noiseVar = No/2
-            LLRsTemp = reshapedY*2 / np.repeat(np.expand_dims(np.sqrt(noiseVar), -1), reshapedY.shape[1], axis = 1)
+            LLRsTemp = reshapedY*2 / np.repeat(np.expand_dims(noiseVar, -1), reshapedY.shape[1], axis = 1)
         return tf.constant(np.reshape(LLRsTemp, [self.batchSize, self.N]).transpose(), dtype=tf.float64)
 
     def CalculateSingleLLRTF(self, y):
@@ -94,13 +96,21 @@ class Channel(object):
             EbN0 = 10**(self.parameters/10) # EbN0dB = parameter
             No = 1/(EbN0 * self.codeRate)
             noiseVar = No/2
-            LLR = y*2 / np.sqrt(noiseVar)
+            LLR = y*2 / noiseVar
         return LLR
 
     def GenerateLLRs(self, simulateChannel):
-        channelOutput = np.zeros([self.N, self.batchSize], dtype=np.int32)
         if(simulateChannel):
+            kWords = np.random.binomial(n=1, p=0.5, size=[self.batchSize, self.generatorMatrix.shape[0]])
+            #testWord = np.array([ 1,     1,     0,     0,     1,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0]) #np.array([1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) #
+            channelInput = np.transpose(np.dot(kWords, self.generatorMatrix)) % 2 # #np.zeros([self.N, self.batchSize], dtype=np.int32) np.repeat(np.expand_dims(testWord, axis=-1), repeats=self.batchSize, axis=1) #
+            channelOutput = channelInput
             channelOutput = self.SimulateChannelTF(channelOutput)
-        if(self.channelType == 'AWGN'):
-            channelOutput = channelOutput * -2 +1
-        return self.CalculateLLRsTF(channelOutput), channelOutput
+            # if(sum(channelOutput) > 0):
+            #     waleed = 0
+        else:
+            channelInput = np.zeros([self.N, self.batchSize], dtype=np.int32)
+            channelOutput = channelInput
+            if(self.channelType == 'AWGN'): # Voltages need to be after that not binary values
+                channelOutput = channelOutput * -2 +1
+        return self.CalculateLLRsTF(channelOutput), channelOutput, channelInput

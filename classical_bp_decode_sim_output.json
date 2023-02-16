@@ -1,18 +1,18 @@
 {
-    "bp_converge_failure_rate": 0.008000000000000007,
-    "bp_frame_error_rate": 0.016000000000000014,
-    "bp_frame_error_rate_eb": 0.00396787096564392,
+    "bp_converge_failure_rate": 0.371,
+    "bp_frame_error_rate": 0.4284,
+    "bp_frame_error_rate_eb": 0.004948468854100226,
     "bp_method": "Ps",
-    "bp_success_count": 984,
+    "bp_success_count": 5716,
     "code_type": "rep_code_500",
-    "elapsed_sim_time": "00:00:00",
-    "error_rate": 0.0004,
+    "elapsed_sim_time": "00:00:21",
+    "error_rate": 0.01,
     "k": 157,
     "max_iter": 12,
     "n": 258,
-    "run_count": 1000,
+    "run_count": 10000,
     "run_type": "classical_decode_sim",
     "seed": 100,
-    "start_date": "Tuesday, January 31, 2023 14:04:05",
-    "target_runs": 1000
+    "start_date": "Thursday, February 09, 2023 08:15:42",
+    "target_runs": 10000
 }

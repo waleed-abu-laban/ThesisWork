@@ -3,9 +3,9 @@ import math
 
 class LossFunctionNULL(object): # no loss function
     def __call__(self, decodedLLRs):
-        return 0
+        return tf.zeros_like(decodedLLRs)
 
-    def SetLabels(self, LLRs):
+    def SetLabels(self, channelLabels):
         None
 
     def SetHOrtho(self, Hortho):
@@ -13,10 +13,10 @@ class LossFunctionNULL(object): # no loss function
 
 class LossFunctionLiu(object): # Liu paper loss function
     def __call__(self, decodedLLRs):
-        return (tf.reduce_sum(self.__AbsSin(tf.tensordot(self.Hortho, tf.expand_dims(self.labels + self.__Fermi(decodedLLRs), -1), axes = 1)), axis = 0)) #/ self.lMax
+        return tf.reduce_mean(self.__AbsSin(self.Hortho@(self.labels + self.__Fermi(decodedLLRs))), axis = 0) #/ self.lMax
     
-    def SetLabels(self, channelOutput):
-        self.labels = tf.constant(channelOutput, tf.float64)
+    def SetLabels(self, channelLabels):
+        self.labels = tf.constant(channelLabels, tf.float64)
 
     def SetHOrtho(self, Hortho):
         self.Hortho = Hortho
@@ -34,8 +34,8 @@ class LossFunctionCE(object): # Cross Entropy loss function
     def SetHOrtho(self, Hortho):
         None
 
-    def SetLabels(self, channelOutput):
-        self.labels = tf.constant(channelOutput, tf.float64)
+    def SetLabels(self, channelLabels):
+        self.labels = tf.constant(channelLabels, tf.float64)
 
 
 
