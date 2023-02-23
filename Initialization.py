@@ -131,8 +131,8 @@ def CodeInitialization(parityCode):
     elif(parityCode == "QHypergraph"):
         Ns = [129 * 2] #[129]
         NKs = [28]
-        lMax = 12
-        allParameters = [np.array([1e-2, 8e-3, 6e-3, 4e-3, 2e-3, 1e-3, 8e-4, 6e-4, 4e-4])] #[np.linspace(0.01, 0.05, 6)] #[np.array([1e-2, 8e-3, 6e-3, 4e-3, 2e-3, 1e-3, 8e-4, 6e-4, 4e-4])] #[np.array([1e-2, 5.9e-3, 3.5e-3, 2.1e-3, 1.2e-3, 7.8e-4, 4.5e-4, 2.7e-4, 1.6e-4, 9.7e-5])] #[np.arange(1e-2, 5e-2, 7e-3)]
+        lMax = 50 #12
+        allParameters = [np.array([1e-2, 3e-3, 6e-4])] #[np.array([1e-2, 8e-3, 6e-3, 4e-3, 2e-3, 1e-3, 8e-4, 6e-4, 4e-4])] #[np.linspace(0.01, 0.05, 6)] #[np.array([1e-2, 8e-3, 6e-3, 4e-3, 2e-3, 1e-3, 8e-4, 6e-4, 4e-4])] #[np.array([1e-2, 5.9e-3, 3.5e-3, 2.1e-3, 1.2e-3, 7.8e-4, 4.5e-4, 2.7e-4, 1.6e-4, 9.7e-5])] #[np.arange(1e-2, 5e-2, 7e-3)]
         channelType = 'BSC'
         dataPaths = []
         dataPathsOrtho = []
@@ -143,7 +143,7 @@ def CodeInitialization(parityCode):
             NK = NKs[i]
             dataPaths.append("codesQLDPC\Hypergraph_" + str(N//2) + "_" + str(NK) + ".alist") #("codesQLDPC\H_new.alist")
             dataPathsOrtho.append("codesQLDPC\HorthoMatrix_Hypergraph_" + str(N//2) + "_" + str(NK) + ".txt") #("codesQLDPC\Hortho_new.txt") #("codesQLDPC\Hz.txt") ("codesQLDPC\logicalWords.txt")#
-            modelsPaths.append("Models\\QHypergraph_N129_Nk28_BCE10^3Ones")#("Models\\" + str(parityCode) + "_N" + str(N//2) + "_Nk" + str(NK))
+            modelsPaths.append("Models\\QHypergraph_N129_Nk28_Liu10^4")#("Models\\" + str(parityCode) + "_N" + str(N//2) + "_Nk" + str(NK))
             resultsPaths.append("Results\\" + str(parityCode) + "_N"+ str(N//2) + "_NK" + str(NK) + "_NBP_" + str(lMax) + "it_" + str(channelType) + ".txt")
         
         generatorMatrixPaths.append("codesQLDPC\Lx.txt")
@@ -154,7 +154,7 @@ def CodeInitialization(parityCode):
         batchSizeTrain = allParameters[0].size * 20
         learningRate = 0.001
         epochs = 1000
-        batchSizeTest = 100
+        batchSizeTest = 1000
     #------------------------------------------------------------------------------------------
 
     iniDescriptor.Ns = Ns

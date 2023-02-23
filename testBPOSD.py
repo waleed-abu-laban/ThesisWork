@@ -1,28 +1,28 @@
 import numpy as np
-# from ldpc.codes import rep_code
-# from ldpc.bp_decode_sim import classical_decode_sim
+from ldpc.codes import rep_code
+from ldpc.bp_decode_sim import classical_decode_sim
 
-# d=500
+d=500
 
-# pcm=np.loadtxt("codesQLDPC\HMatrix_Hypergraph_129_28.txt") # ("codesHDPC\BCH_15_11.txt")#
-# error_rate=1e-2
+pcm=np.loadtxt("codesQLDPC\HMatrix_Hypergraph_129_28.txt") # ("codesHDPC\BCH_15_11.txt")#
+error_rate=1e-2
 
-# output_dict={}
-# output_dict['code_type']=f"rep_code_{d}"
+output_dict={}
+output_dict['code_type']=f"rep_code_{d}"
 
-# output_dict=classical_decode_sim(
-#     pcm,
-#     error_rate,
-#     target_runs=10000,
-#     max_iter=12,
-#     seed=100,
-#     bp_method='Ps',
-#     ms_scaling_factor=1,
-#     output_file="classical_bp_decode_sim_output.json",
-#     output_dict=output_dict
-# )
+output_dict=classical_decode_sim(
+    pcm,
+    error_rate,
+    target_runs=10000,
+    max_iter=50,
+    seed=100,
+    bp_method='Ps',
+    ms_scaling_factor=1,
+    output_file="classical_bp_decode_sim_output.json",
+    output_dict=output_dict
+)
 
-# print(output_dict)
+print(output_dict)
 
 
 # from bposd.css import css_code
@@ -56,32 +56,32 @@ import numpy as np
 #     )
 
 
-import numpy as np
-from bposd.hgp import hgp
-from bposd.css_decode_sim import css_decode_sim
-from bposd.css import css_code
+# import numpy as np
+# from bposd.hgp import hgp
+# from bposd.css_decode_sim import css_decode_sim
+# from bposd.css import css_code
 
-# h=np.loadtxt("codesQLDPC/mkmn_16_4_6.txt").astype(int)
-# qcode=hgp(h) # construct quantum LDPC code using the symmetric hypergraph product
+# # h=np.loadtxt("codesQLDPC/mkmn_16_4_6.txt").astype(int)
+# # qcode=hgp(h) # construct quantum LDPC code using the symmetric hypergraph product
 
-hx = np.loadtxt("codesQLDPC\Hx.txt")
-hz = np.loadtxt("codesQLDPC\Hz.txt")
-qcode = css_code(hx, hz)
+# hx = np.loadtxt("codesQLDPC\Hx.txt")
+# hz = np.loadtxt("codesQLDPC\Hz.txt")
+# qcode = css_code(hx, hz)
 
-osd_options={
-'error_rate': 0.01,
-'target_runs': 10000,
-'xyz_error_bias': [1, 0, 1],
-'output_file': 'test.json',
-'bp_method': "Ps",
-'ms_scaling_factor': 0,
-'osd_method': "OSD_0",
-'osd_order': 42,
-'channel_update': None,
-'seed': 42,
-'max_iter': 12,
-'output_file': "test.json"
-}
+# osd_options={
+# 'error_rate': 0.01,
+# 'target_runs': 10000,
+# 'xyz_error_bias': [1, 0, 1],
+# 'output_file': 'test.json',
+# 'bp_method': "Ps",
+# 'ms_scaling_factor': 0,
+# 'osd_method': "OSD_0",
+# 'osd_order': 42,
+# 'channel_update': None,
+# 'seed': 42,
+# 'max_iter': 12,
+# 'output_file': "test.json"
+# }
 
-lk = css_decode_sim(hx=qcode.hx, hz=qcode.hz, **osd_options)
-waleed = 0
+# lk = css_decode_sim(hx=qcode.hx, hz=qcode.hz, **osd_options)
+# waleed = 0
