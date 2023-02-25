@@ -102,7 +102,7 @@ for counter in range(len(Ns)):
         while(ResultsCalculator.Continue()):
 
             # run NBP algorithm
-            Edges, decodedWord, channelOutput, channelInput = NBPObject.DecimatedBeliefPropagation(ResultsCalculator)
+            Edges, decodedWord, channelOutput, channelInput = NBPObject.ParticleBeliefPropagation() #NBPObject.DecimatedBeliefPropagation(ResultsCalculator)
 
             # calculate the error rates ---------------------------------------------------
             if(isSyndromeBased):

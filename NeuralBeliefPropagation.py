@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+from MathFunctions import Fermi
 
 class NBPInstance(tf.Module):
     def __init__(self, CodeDescriptor, isSyndromeBased, lMax, LossFunctor, Channel):
@@ -16,6 +17,8 @@ class NBPInstance(tf.Module):
         self.SetSyndrome(tf.zeros((self.vNodes.shape[0], Channel.GetBatchSize())))
         self.weights = tf.ones(shape=(lMax, CodeDescriptor.EdgesCount), dtype=tf.float64)
         self.biases = tf.ones(shape=(lMax, CodeDescriptor.vNodes.shape[0]), dtype=tf.float64)
+        self.H = tf.constant(np.loadtxt("codesQLDPC\HMatrix_Hypergraph_129_28.txt"), dtype=tf.int32)
+        tf.random.set_seed(100)
 
     def SetLossFunctor(self, LossFunctor):
         self.LossFunction = LossFunctor
@@ -209,7 +212,7 @@ class NBPInstance(tf.Module):
         else:
             return np.sum(1 * np.logical_not(self.terminated))
 
-    def CalculateTermination(self, decodedLLRs, Edges):
+    def CalculateTermination(self, decodedLLRs, Edges = 0):
         if(self.isSyndromeBased):
             decodedSynd = self.CalculateSyndromeLLRs(decodedLLRs)
             originalSynd = 1 * np.array(self.syndrome < 0)
@@ -317,8 +320,33 @@ class NBPInstance(tf.Module):
                             EdgesIni,\
                             tf.constant(0,dtype=tf.int32),\
                             tf.constant(0.0, dtype=tf.float64)]))
-    
+
         return Edges, tf.cast(decodedLLRs < 0, tf.int64), channelOutput, channelInput
+
+    def ParticleBeliefPropagation(self):
+        channelOutput, channelInput = self.GenerateCodeWords()
+        EdgesIni = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
+        EdgesIni = self.FillEdges(EdgesIni, self.LLRs)
+        self.decimationMask = tf.zeros_like(EdgesIni)
+        self.VNMaskValues = tf.zeros([self.vNodes.shape[0], self.batchSize], dtype=tf.float64)
+
+        # parameters: [decodedLLRs, iteration, loss]
+        decodedLLRs, Edges, iteration, loss = \
+            tf.nest.map_structure(tf.stop_gradient,\
+                            tf.while_loop(\
+                            self.ContinueCalculation,\
+                            self.BeliefPropagationIt,\
+                            [tf.ones([self.vNodes.shape[0], self.batchSize], dtype=tf.float64) * -1,\
+                            EdgesIni,\
+                            tf.constant(0,dtype=tf.int32),\
+                            tf.constant(0.0, dtype=tf.float64)]))
+    
+        # decodedLLRsTest = decodedLLRs.numpy()
+        # np.savetxt("decodedLLRs", decodedLLRsTest)
+        # originalSynd = 1 * np.array(self.syndrome < 0)
+        # np.savetxt("originalSynd", originalSynd)
+
+        return Edges, self.ParticleSpread(decodedLLRs, 100), channelOutput, channelInput
 
     def DecimatedBeliefPropagation(self, ResultsCalculator):
         channelOutput, channelInput = self.GenerateCodeWords()
@@ -357,6 +385,29 @@ class NBPInstance(tf.Module):
 
         ResultsCalculator.SetUpdate(True)
         return Edges, tf.cast(decodedLLRs < 0, tf.int64), channelOutput, channelInput
+
+    def ParticleSpread(self, decodedLLRs, particlesCount):
+        decodedWords = tf.cast(decodedLLRs < 0, tf.int32)
+        oneProb = Fermi(decodedLLRs)
+        for i in range(particlesCount):
+            
+            filteredOneProb = tf.boolean_mask(oneProb, tf.logical_not(self.terminated), axis=1)
+            particles = tf.random.uniform(filteredOneProb.shape, dtype=tf.dtypes.float64)
+            newCodeWord = tf.cast(particles < filteredOneProb, tf.int32)
+
+            indices = tf.expand_dims(tf.boolean_mask(tf.range(decodedLLRs.shape[1]), tf.logical_not(self.terminated)), axis=-1)
+            decodedWords = tf.transpose(tf.tensor_scatter_nd_update(tf.transpose(decodedWords), indices, tf.transpose(newCodeWord)))
+
+            decodedSynd = self.H @ newCodeWord
+            originalSynd = tf.cast(tf.boolean_mask(self.syndrome, tf.logical_not(self.terminated), axis=1) < 0, tf.int32)
+            diff = tf.cast(tf.reduce_sum(tf.abs(originalSynd - decodedSynd), axis=0) == 0, tf.int32)
+            self.terminated = tf.cast(tf.transpose(tf.tensor_scatter_nd_max(tf.cast(tf.transpose(self.terminated), tf.int32), indices, tf.transpose(diff))), tf.bool)
+            
+            if(tf.reduce_sum(tf.cast(tf.logical_not(self.terminated), tf.int32)) == 0):
+                break
+
+        return decodedWords
+
 
     def GenerateCodeWords(self):
         LLRs, channelOutput, channelInput = self.Channel.GenerateLLRs(True)

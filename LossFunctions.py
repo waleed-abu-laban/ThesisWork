@@ -1,5 +1,5 @@
 import tensorflow as tf
-import math
+from MathFunctions import Fermi, AbsSin
 
 class LossFunctionNULL(object): # no loss function
     def __call__(self, decodedLLRs):
@@ -13,19 +13,13 @@ class LossFunctionNULL(object): # no loss function
 
 class LossFunctionLiu(object): # Liu paper loss function
     def __call__(self, decodedLLRs):
-        return tf.reduce_mean(self.__AbsSin(self.Hortho@(self.labels + self.__Fermi(decodedLLRs))), axis = 0) #/ self.lMax
+        return tf.reduce_mean(AbsSin(self.Hortho@(self.labels + Fermi(decodedLLRs))), axis = 0) #/ self.lMax
     
     def SetLabels(self, channelLabels):
         self.labels = tf.constant(channelLabels, tf.float64)
 
     def SetHOrtho(self, Hortho):
         self.Hortho = Hortho
-
-    def __Fermi(self, x):
-        return 1.0 / (tf.math.exp(x) + 1.0)
-
-    def __AbsSin(self, x):
-        return tf.math.abs(tf.math.sin(x * math.pi /2))
 
 class LossFunctionCE(object): # Cross Entropy loss function
     def __call__(self, decodedLLRs):
