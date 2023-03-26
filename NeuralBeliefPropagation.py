@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
-from MathFunctions import Fermi
+from MathFunctions import Fermi, IsFloat
+ERASURE = 0.3333
 
 class NBPInstance(tf.Module):
     def __init__(self, CodeDescriptor, isSyndromeBased, lMax, LossFunctor, Channel):
@@ -17,7 +18,7 @@ class NBPInstance(tf.Module):
         self.SetSyndrome(tf.zeros((self.vNodes.shape[0], Channel.GetBatchSize())))
         self.weights = tf.ones(shape=(lMax, CodeDescriptor.EdgesCount), dtype=tf.float64)
         self.biases = tf.ones(shape=(lMax, CodeDescriptor.vNodes.shape[0]), dtype=tf.float64)
-        self.H = tf.constant(np.loadtxt("codesQLDPC\HMatrix_Hypergraph_129_28.txt"), dtype=tf.int32)
+        self.H = tf.constant(np.loadtxt("codesQLDPC\HMatrix_Hypergraph_129_28.txt"), dtype=tf.int32) #(np.loadtxt("codesQLDPC\Hz_400_16.txt"), dtype=tf.int32) #
         tf.random.set_seed(100)
 
     def SetLossFunctor(self, LossFunctor):
@@ -71,6 +72,52 @@ class NBPInstance(tf.Module):
 
         Edges = tf.clip_by_value(Edges, clip_value_min=-20, clip_value_max=20)
         return Edges, sum
+    
+    def CalculateVErasures(self, Edges, codeWords):
+        orderedEdges =  tf.gather(Edges, self.vNodes)
+        isErasure, isNotErasure = IsFloat(codeWords)
+        filterNewCodeWord = codeWords * isNotErasure + isErasure * tf.reduce_sum(orderedEdges, axis = 1) #This is wrong, if one is not erasure it is enough
+        
+        orderedEdgesTest = orderedEdges.numpy()
+        isErasureTest = isErasure.numpy()
+        filterNewCodeWordTest = filterNewCodeWord.numpy()
+
+        flatIndices = tf.reshape(self.vNodes, [-1])
+        newValues =  tf.repeat(filterNewCodeWord, repeats=self.vDegrees, axis = 0) - (tf.gather(Edges, flatIndices) * tf.repeat(isErasure, repeats=self.vDegrees, axis = 0)) 
+        
+        fullErasure = ERASURE * tf.ones_like(orderedEdges)
+        fullErasureCompare = tf.reduce_sum(fullErasure, axis = 1)
+        fullErasureCompareEdges = tf.repeat(fullErasureCompare, repeats=self.vDegrees, axis = 0) - ERASURE
+        isErasureLogical = tf.abs(fullErasureCompareEdges - newValues) < 0.001
+        isNotErasureLogical = tf.logical_not(isErasureLogical)
+
+        newValues = newValues * tf.repeat(isNotErasure, repeats=self.vDegrees, axis = 0) + \
+        tf.repeat(isErasure, repeats=self.vDegrees, axis = 0) * (tf.cast(newValues > fullErasureCompareEdges, tf.float64) * tf.cast(isNotErasureLogical, tf.float64) + tf.cast(isErasureLogical, tf.float64) * ERASURE)
+        Edges = self.IndexFilter(Edges, flatIndices, newValues)
+
+        isErasureLogical = tf.abs(fullErasureCompare - filterNewCodeWord) < 1e-9
+        isNotErasureLogical = tf.logical_not(isErasureLogical)
+        filterNewCodeWord = filterNewCodeWord * isNotErasure + \
+        isErasure * (tf.cast(filterNewCodeWord > fullErasureCompare, tf.float64) * tf.cast(isNotErasureLogical, tf.float64) + tf.cast(isErasureLogical, tf.float64) * ERASURE)
+
+        fullErasureCompareTest = fullErasureCompare.numpy()
+        isErasureLogicalTest = isErasureLogical.numpy()
+        filterNewCodeWordTest2 = filterNewCodeWord.numpy()
+
+        return Edges, filterNewCodeWord
+
+    def CalculateCErasures(self, Edges, Syndrome):
+        orderedEdges =  tf.gather(Edges, self.cNodes)
+        sum = tf.reduce_sum(orderedEdges, axis = 1) + Syndrome
+        
+        flatIndices = tf.reshape(self.cNodes, [-1])
+        newValues =  tf.repeat(sum, repeats=self.cDegrees, axis = 0) - tf.gather(Edges, flatIndices) 
+        Edges = self.IndexFilter(Edges, flatIndices, newValues)
+
+        isErasure, isNotErasure = IsFloat(Edges)
+        Edges = Edges % 2 * isNotErasure + isErasure * ERASURE
+
+        return Edges
 
     def BoxPlusOp(self, L1, L2):
         maxThreshold = 1e70
@@ -179,7 +226,7 @@ class NBPInstance(tf.Module):
         mask[0] = 0
         for i in tf.experimental.numpy.arange(reshapedtanhValues.shape[1]):
             maskedProdValues = tf.boolean_mask(reshapedtanhValues, np.roll(mask, i), axis=1)
-            if(i == 0):
+            if(i.numpy() == 0):
                 finalProd = tf.reduce_prod(maskedProdValues, axis=1, keepdims=True)
             else:
                 finalProd = tf.concat([finalProd, tf.reduce_prod(maskedProdValues, axis=1, keepdims=True)], axis=1)
@@ -205,7 +252,6 @@ class NBPInstance(tf.Module):
 
     def ContinueCalculation(self, decodedLLRs, Edges, iteration, loss):
         if(iteration == 0):
-            self.terminated = np.zeros(Edges.shape[1], dtype=bool)
             return True
         elif(iteration >= self.lMax):
             return False
@@ -234,11 +280,11 @@ class NBPInstance(tf.Module):
         Edges = tf.transpose(tf.tensor_scatter_nd_update(tf.transpose(Edges), indices, tf.transpose(filteredEdges)))
         decodedLLRs = tf.transpose(tf.tensor_scatter_nd_update(tf.transpose(decodedLLRs), indices, tf.transpose(filteredDecodedLLRs)))
         
-        condition = tf.cast(tf.logical_not(tf.cast(self.decimationMask, bool)), tf.float64)
-        Edges = Edges * condition + self.decimationMask
-        Edges = tf.clip_by_value(Edges, clip_value_min=-20, clip_value_max=20)
-        condition2 = tf.cast(tf.logical_not(tf.cast(self.VNMaskValues, bool)), tf.float64)
-        decodedLLRs = decodedLLRs * condition2 + self.VNMaskValues
+        # condition = tf.cast(tf.logical_not(tf.cast(self.decimationMask, bool)), tf.float64)
+        # Edges = Edges * condition + self.decimationMask
+        # Edges = tf.clip_by_value(Edges, clip_value_min=-20, clip_value_max=20)
+        # condition2 = tf.cast(tf.logical_not(tf.cast(self.VNMaskValues, bool)), tf.float64)
+        # decodedLLRs = decodedLLRs * condition2 + self.VNMaskValues
 
         terminatedBefore = self.terminated
         self.CalculateTermination(decodedLLRs, Edges)
@@ -248,8 +294,48 @@ class NBPInstance(tf.Module):
         loss += tf.where(tf.logical_not(terminatedBefore), self.LossFunction(decodedLLRs), 0)
         loss *= averagingScale
         
+        
+
+        # indices = tf.expand_dims(tf.boolean_mask(tf.range(decodedLLRs.shape[1]), (newTerminated)), axis=-1)
+        # newCodeWord = tf.cast(tf.boolean_mask(decodedLLRs, (newTerminated), axis=1) < 0, tf.int32)
+        # self.decodedWords = tf.transpose(tf.tensor_scatter_nd_update(tf.transpose(self.decodedWords), indices, tf.transpose(newCodeWord)))
+        
+        # terminatedBefore2 = self.terminated
+        # newDecodedWords = tf.cast(self.ErasurePropagationOp(decodedLLRs), tf.int32)
+        # newTerminated2 = np.logical_xor(terminatedBefore2, self.terminated)
+        
+        # # terminatedBefore2 = self.terminated
+        # # newDecodedWords = self.ParticleSpread(decodedLLRs, 100)
+        # # newTerminated2 = np.logical_xor(terminatedBefore2, self.terminated)
+
+        # indices = tf.expand_dims(tf.boolean_mask(tf.range(decodedLLRs.shape[1]), (newTerminated2)), axis=-1)
+        # newCodeWord2 = tf.boolean_mask(newDecodedWords, (newTerminated2), axis=1)
+        # self.decodedWords = tf.transpose(tf.tensor_scatter_nd_update(tf.transpose(self.decodedWords), indices, tf.transpose(newCodeWord2)))
+        
         return decodedLLRs, Edges, iteration, loss
 
+    def ErasurePropagationIt(self, decodedWord, Edges, iteration, loss):
+        filteredEdges = tf.boolean_mask(Edges, tf.logical_not(self.terminated), axis=1)
+        filteredDecodedWord = tf.boolean_mask(decodedWord, tf.logical_not(self.terminated), axis=1)
+        originalSynd = tf.cast(self.syndrome < 0, tf.float64)
+        filteredSyndrome = tf.boolean_mask(originalSynd, tf.logical_not(self.terminated), axis=1)
+
+        filteredEdges = self.CalculateCErasures(filteredEdges, filteredSyndrome) # Check nodes
+        filteredEdges, filteredDecodedWords = self.CalculateVErasures(filteredEdges, filteredDecodedWord) # Variable nodes
+        iteration += 1
+        
+        indices = tf.expand_dims(tf.boolean_mask(tf.range(Edges.shape[1]), tf.logical_not(self.terminated)), axis=-1)
+        Edges = tf.transpose(tf.tensor_scatter_nd_update(tf.transpose(Edges), indices, tf.transpose(filteredEdges)))
+        decodedWord = tf.transpose(tf.tensor_scatter_nd_update(tf.transpose(decodedWord), indices, tf.transpose(filteredDecodedWords)))
+        
+        isErasure, isNotErasure = IsFloat(tf.reduce_sum(decodedWord, axis=0))
+        decodedSynd = (self.H @ tf.cast(decodedWord, tf.int32))%2
+        originalSynd = 1 * np.array(self.syndrome < 0)
+        test = isNotErasure * (np.sum(np.abs(originalSynd - decodedSynd), axis=0) == 0)
+        self.terminated = np.logical_or(self.terminated, isNotErasure * (np.sum(np.abs(originalSynd - decodedSynd), axis=0) == 0))
+
+        return decodedWord, Edges, iteration, 0
+    
     def DecimateNodes(self, decodedLLRs):
         VNMask = tf.logical_not(tf.cast(self.VNMaskValues, bool))
         filteredDecodedLLRs = tf.abs(tf.where(VNMask, decodedLLRs, 0)) #tf.abs(tf.ragged.boolean_mask(decodedLLRs, VNMask).to_tensor(default_value=0))
@@ -289,7 +375,9 @@ class NBPInstance(tf.Module):
         EdgesIni = self.FillEdges(EdgesIni, self.LLRs)
         self.decimationMask = tf.zeros_like(EdgesIni)
         self.VNMaskValues = tf.zeros([self.vNodes.shape[0], self.batchSize], dtype=tf.float64)
-
+        
+        self.terminated = np.zeros(EdgesIni.shape[1], dtype=bool)
+        self.decodedWords = tf.zeros_like(self.LLRs, dtype=tf.int32)
         # parameters: [decodedLLRs, iteration, loss]
         decodedLLRs, Edges, iteration, loss = \
                             tf.while_loop(\
@@ -309,7 +397,11 @@ class NBPInstance(tf.Module):
         EdgesIni = self.FillEdges(EdgesIni, self.LLRs)
         self.decimationMask = tf.zeros_like(EdgesIni)
         self.VNMaskValues = tf.zeros([self.vNodes.shape[0], self.batchSize], dtype=tf.float64)
+        
+        self.channelOutput = channelOutput
 
+        self.terminated = np.zeros(EdgesIni.shape[1], dtype=bool)
+        self.decodedWords = tf.zeros_like(self.LLRs, dtype=tf.int32)
         # parameters: [decodedLLRs, iteration, loss]
         decodedLLRs, Edges, iteration, loss = \
             tf.nest.map_structure(tf.stop_gradient,\
@@ -320,8 +412,33 @@ class NBPInstance(tf.Module):
                             EdgesIni,\
                             tf.constant(0,dtype=tf.int32),\
                             tf.constant(0.0, dtype=tf.float64)]))
+        
+        #tf.cast(decodedLLRs < 0, tf.int64)
 
-        return Edges, tf.cast(decodedLLRs < 0, tf.int64), channelOutput, channelInput
+        return Edges, decodedLLRs, channelOutput, channelInput
+
+    def ErasurePropagationOp(self, decodedLLRs):
+        # originalLMax = self.lMax
+        # self.lMax = 1
+
+        EdgesIni, decodedWords = self.ErasureTransform(decodedLLRs)
+        test1 = decodedWords.numpy()
+        error = np.abs(test1 - self.channelOutput)
+        decodedLLRsTest = decodedLLRs.numpy()
+
+        # parameters: [decodedWords, iteration, loss]
+        decodedWords, Edges, iteration, loss = \
+            tf.nest.map_structure(tf.stop_gradient,\
+                            tf.while_loop(\
+                            self.ContinueCalculation,\
+                            self.ErasurePropagationIt,\
+                            [decodedWords,\
+                            EdgesIni,\
+                            tf.constant(0,dtype=tf.int32),\
+                            tf.constant(0.0, dtype=tf.float64)]))
+
+        #self.lMax = originalLMax
+        return decodedWords
 
     def ParticleBeliefPropagation(self):
         channelOutput, channelInput = self.GenerateCodeWords()
@@ -329,7 +446,9 @@ class NBPInstance(tf.Module):
         EdgesIni = self.FillEdges(EdgesIni, self.LLRs)
         self.decimationMask = tf.zeros_like(EdgesIni)
         self.VNMaskValues = tf.zeros([self.vNodes.shape[0], self.batchSize], dtype=tf.float64)
-
+        
+        self.terminated = np.zeros(EdgesIni.shape[1], dtype=bool)
+        self.decodedWords = tf.zeros_like(self.LLRs, dtype=tf.int32)
         # parameters: [decodedLLRs, iteration, loss]
         decodedLLRs, Edges, iteration, loss = \
             tf.nest.map_structure(tf.stop_gradient,\
@@ -346,7 +465,9 @@ class NBPInstance(tf.Module):
         # originalSynd = 1 * np.array(self.syndrome < 0)
         # np.savetxt("originalSynd", originalSynd)
 
-        return Edges, self.ParticleSpread(decodedLLRs, 100), channelOutput, channelInput
+        #self.ParticleSpread(decodedLLRs, 100)
+
+        return Edges, self.decodedWords, channelOutput, channelInput
 
     def DecimatedBeliefPropagation(self, ResultsCalculator):
         channelOutput, channelInput = self.GenerateCodeWords()
@@ -355,7 +476,7 @@ class NBPInstance(tf.Module):
         self.decimationMask = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
         self.VNMaskValues = tf.zeros([self.vNodes.shape[0], self.batchSize], dtype=tf.float64)
         ResultsCalculator.SetUpdate(False)
-
+        
         for i in range(NumberOfBPOperations + 1) :
             EdgesIni = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
             EdgesIni = self.FillEdges(EdgesIni, self.LLRs)
@@ -363,6 +484,8 @@ class NBPInstance(tf.Module):
             EdgesIni = EdgesIni * condition + self.decimationMask
             EdgesIni = tf.clip_by_value(EdgesIni, clip_value_min=-20, clip_value_max=20)
 
+            self.terminated = np.zeros(EdgesIni.shape[1], dtype=bool)
+            self.decodedWords = tf.zeros_like(self.LLRs, dtype=tf.int32)
             # parameters: [decodedLLRs, iteration, loss]
             decodedLLRs, Edges, iteration, loss = \
                 tf.nest.map_structure(tf.stop_gradient,\
@@ -386,6 +509,27 @@ class NBPInstance(tf.Module):
         ResultsCalculator.SetUpdate(True)
         return Edges, tf.cast(decodedLLRs < 0, tf.int64), channelOutput, channelInput
 
+    def ErasureTransform(self, decodedLLRs):
+        EdgesIni = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
+        EdgesIni = self.FillEdges(EdgesIni, decodedLLRs)
+        checkNodes = tf.gather(EdgesIni, self.cNodes)
+
+        expandedCheckNode = checkNodes.to_tensor(default_value=50)
+        nodesIndex = tf.argmin(tf.abs(expandedCheckNode), axis=1)
+        oneHot = tf.one_hot(indices=nodesIndex , depth=expandedCheckNode.shape[1], on_value=False, off_value=True, axis=1)
+        
+        expandedCheckNode = tf.cast(expandedCheckNode < 0, tf.float64)
+        erasured = tf.where(oneHot, expandedCheckNode, ERASURE)
+        raggedCheckNodes = tf.RaggedTensor.from_tensor(erasured, lengths=self.cDegrees)
+
+        flatCheckNodes = tf.reshape(raggedCheckNodes, [-1, raggedCheckNodes.shape[-1]])
+        flatIndices = tf.reshape(self.cNodes, [-1])
+        Edges = self.IndexFilter(EdgesIni, flatIndices, flatCheckNodes)
+
+        _, decodedWords = self.CalculateVErasures(Edges, tf.ones([self.vNodes.shape[0], self.batchSize], dtype=tf.float64) * ERASURE)
+
+        return Edges, decodedWords
+
     def ParticleSpread(self, decodedLLRs, particlesCount):
         decodedWords = tf.cast(decodedLLRs < 0, tf.int32)
         oneProb = Fermi(decodedLLRs)
@@ -398,11 +542,16 @@ class NBPInstance(tf.Module):
             indices = tf.expand_dims(tf.boolean_mask(tf.range(decodedLLRs.shape[1]), tf.logical_not(self.terminated)), axis=-1)
             decodedWords = tf.transpose(tf.tensor_scatter_nd_update(tf.transpose(decodedWords), indices, tf.transpose(newCodeWord)))
 
-            decodedSynd = self.H @ newCodeWord
+            decodedSynd = (self.H @ newCodeWord)%2
             originalSynd = tf.cast(tf.boolean_mask(self.syndrome, tf.logical_not(self.terminated), axis=1) < 0, tf.int32)
             diff = tf.cast(tf.reduce_sum(tf.abs(originalSynd - decodedSynd), axis=0) == 0, tf.int32)
+            terminatedBefore = self.terminated
             self.terminated = tf.cast(tf.transpose(tf.tensor_scatter_nd_max(tf.cast(tf.transpose(self.terminated), tf.int32), indices, tf.transpose(diff))), tf.bool)
             
+            # newTerminated = np.logical_xor(terminatedBefore, self.terminated)
+            # if(tf.reduce_sum(tf.cast(newTerminated, tf.int32)) > 0):
+            #     waleed = 0
+
             if(tf.reduce_sum(tf.cast(tf.logical_not(self.terminated), tf.int32)) == 0):
                 break
 

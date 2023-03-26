@@ -12,7 +12,6 @@ class BaseCalculator:
         self.errorCountTotal = 0
         self.frameCount = 0
         self.frameErrorCount = 0
-        self.bp_success_count = 0
 
     def Continue(self):
         return (self.frameErrorCount < self.maxFrameErrorCount) and (self.frameCount < self.maxFrames)
@@ -67,20 +66,26 @@ class LogicalQuantumCalculator(BaseCalculator):
         if(self.updateOn):
             self.frameCount = frameCountCurrent
 
-        half = errorWord.shape[0] // 2
-        residual_x = errorWord[half:, :]
-        residual_z = errorWord[:half, :]
+        # Flagged
+        filterDataSynd = np.logical_not(termination)
+
+        # Unflagged
+        #errorWord = (decodedWord + channelOutput) % 2
+        errorWordFiltered = errorWord[:, termination]
+        half = errorWordFiltered.shape[0] // 2
+        residual_x = errorWordFiltered[half:, :]
+        residual_z = errorWordFiltered[:half, :]
 
         failx = np.sum(self.lz@residual_x % 2, axis=0) > 0
         failz = np.sum(self.lx@residual_z % 2, axis=0) > 0
-        bp_success_countCurrent = self.bp_success_count + np.sum(1*np.logical_not(np.logical_or(failx, failz)))
+        frameErrorCountCurrent = self.frameErrorCount + np.sum(1*(np.logical_or(failx, failz))) + np.sum(1*(filterDataSynd))
         if(self.updateOn):
-            self.bp_success_count = bp_success_countCurrent
-        errorRate = 1-bp_success_countCurrent/frameCountCurrent
-        #errorRate = 1.0 - (1-bp_logical_error_rate)**(1/28)
+            self.frameErrorCount = frameErrorCountCurrent
+        errorRate = frameErrorCountCurrent/frameCountCurrent
+        #errorRate = 1.0 - (1-errorRate)**(1/28)
 
         # print the data to keep track -------------------------------------------------
-        print(self.parameter, frameCountCurrent, errorRate, bp_success_countCurrent)
+        print(self.parameter, frameCountCurrent, errorRate, frameErrorCountCurrent)
 
         return errorRate
 

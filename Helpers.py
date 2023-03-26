@@ -112,7 +112,7 @@ def FormatHmatrix(H, fileName):
 #H = np.genfromtxt("codesQLDPC\Random_QLDPC_H.csv", delimiter=',')
 #print(H)
 
-H = np.loadtxt("codesQLDPC\Hz.txt")
-FormatHmatrix(H, "codesQLDPC\Hz.alist")
+H = np.loadtxt("codesQLDPC\Hx_400_16.txt")
+FormatHmatrix(H, "codesQLDPC\Hx_400_16.alist")
 #np.savetxt(, H, fmt='%d')
 #print(SparseHmatrix(H, "Bicycle"))

@@ -62,6 +62,7 @@ for counter in range(len(Ns)):
         if(TRAINDATA):
             LossFunction.SetHOrtho(Hortho)
         ResultsCalculator = RC.QuantumCalculator(batchSizeTest, maxFrameErrorCount, maxFrames, Hortho)
+        #ResultsCalculator = RC.LogicalQuantumCalculator(batchSizeTest, maxFrameErrorCount, maxFrames, np.loadtxt(generatorMatrixPaths[0]), np.loadtxt(generatorMatrixPaths[1]))
     else:
         ResultsCalculator = RC.ClassicalCalculator(batchSizeTest, maxFrameErrorCount, maxFrames) #not passing N means BLER
     ChannelObject = Channel(N, batchSizeTrain, channelType, parameters, NK / N, IsQuantum, generatorMatrix)
@@ -102,13 +103,17 @@ for counter in range(len(Ns)):
         while(ResultsCalculator.Continue()):
 
             # run NBP algorithm
-            Edges, decodedWord, channelOutput, channelInput = NBPObject.ParticleBeliefPropagation() #NBPObject.DecimatedBeliefPropagation(ResultsCalculator)
+            Edges,  decodedLLRs, channelOutput, channelInput = NBPObject.NeuralBeliefPropagationOp() #NBPObject.DecimatedBeliefPropagation(ResultsCalculator)
+            if(np.sum(not NBPObject.terminated) > 0):
+                decodedWords = NBPObject.ErasurePropagationOp(decodedLLRs)
+            else:
+                decodedWords = tf.cast(decodedLLRs < 0, tf.int64)
 
             # calculate the error rates ---------------------------------------------------
             if(isSyndromeBased):
-                errorWord = (decodedWord.numpy() + channelOutput + channelInput) % 2
+                errorWord = (decodedWords.numpy() + channelOutput + channelInput) % 2
             else:
-                errorWord = (decodedWord.numpy() + channelInput) % 2
+                errorWord = (decodedWords.numpy() + channelInput) % 2
             # ******************* Quantum *******************
             if(IsQuantum):
                 errorRate = ResultsCalculator.CaclulateErrorRate(errorWord, NBPObject.terminated)
