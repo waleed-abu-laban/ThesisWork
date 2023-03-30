@@ -1,0 +1,12 @@
+50:
+BP : 0.44
+BP with particles : 0.3592857142857142638
+BP with OSD0 : 0.24
+BP with OSD-CS (60) : 0.107
+
+400:
+BP : 0.404
+BP with particles : 0.28
+BP with OSD0 : 0.23
+BP with OSD-CS (60) : 0.11
+
