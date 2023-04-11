@@ -14,7 +14,7 @@ tf.keras.backend.set_floatx('float64')
 # Parameters ==============================================================================
 parityCode = "QHypergraph"
 maxFrameErrorCount = 500
-maxFrames = 2000000
+maxFrames = 10000000
 SaveResults = True
 isZeroCodeWord = True # Generator matrix should be provided if False
 isSyndromeBased = False # Will be True anyway for Quantum case
@@ -103,11 +103,11 @@ for counter in range(len(Ns)):
         while(ResultsCalculator.Continue()):
 
             # run NBP algorithm
-            Edges,  decodedLLRs, channelOutput, channelInput = NBPObject.NeuralBeliefPropagationOp() #NBPObject.DecimatedBeliefPropagation(ResultsCalculator)
-            if(np.sum(not NBPObject.terminated) > 0):
-                decodedWords = NBPObject.ErasurePropagationOp(decodedLLRs)
-            else:
-                decodedWords = tf.cast(decodedLLRs < 0, tf.int64)
+            Edges, decodedLLRs, channelOutput, channelInput = NBPObject.DecimatedBeliefPropagation(ResultsCalculator) #  NBPObject.NeuralBeliefPropagationOp() #
+            # if(np.sum(not NBPObject.terminated) > 0):
+            #     decodedWords = NBPObject.ErasurePropagationOp(decodedLLRs)
+            # else:
+            decodedWords = tf.cast(decodedLLRs < 0, tf.int64)
 
             # calculate the error rates ---------------------------------------------------
             if(isSyndromeBased):

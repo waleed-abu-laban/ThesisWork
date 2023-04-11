@@ -129,9 +129,9 @@ def CodeInitialization(parityCode):
         batchSizeTest = 1000
     #------------------------------------------------------------------------------------------
     elif(parityCode == "QHypergraph"):
-        Ns = [129 * 2] #[129] [400]#
-        NKs = [28] # [16]#
-        lMax = 50 #12
+        Ns = [129] # [129 * 2] # [400] #
+        NKs = [28] # [16]# [16] #
+        lMax = 100
         allParameters = [np.array([1e-2])] #[np.array([1e-2, 8e-3, 6e-3, 4e-3, 2e-3, 1e-3, 8e-4, 6e-4])] #[np.linspace(0.01, 0.05, 6)] #[np.array([1e-2, 8e-3, 6e-3, 4e-3, 2e-3, 1e-3, 8e-4, 6e-4, 4e-4])] #[np.array([1e-2, 5.9e-3, 3.5e-3, 2.1e-3, 1.2e-3, 7.8e-4, 4.5e-4, 2.7e-4, 1.6e-4, 9.7e-5])] #[np.arange(1e-2, 5e-2, 7e-3)]
         channelType = 'BSC'
         dataPaths = []
@@ -141,8 +141,8 @@ def CodeInitialization(parityCode):
         for i in range(len(Ns)):
             N = Ns[i]
             NK = NKs[i]
-            dataPaths.append("codesQLDPC\Hypergraph_" + str(N//2) + "_" + str(NK) + ".alist") #("codesQLDPC\H_new.alist") ("codesQLDPC\Hz_400_16.alist")#
-            dataPathsOrtho.append("codesQLDPC\HorthoMatrix_Hypergraph_" + str(N//2) + "_" + str(NK) + ".txt") #("codesQLDPC\Hortho_new.txt") #("codesQLDPC\Hz.txt") ("codesQLDPC\logicalWords.txt")# ("codesQLDPC\HzOrtho_400_16.txt")#
+            dataPaths.append("codesQLDPC\Hz.alist")#  ("codesQLDPC\Hz_400_16.alist")# ("codesQLDPC\Hypergraph_" + str(N//2) + "_" + str(NK) + ".alist") #("codesQLDPC\H_new.alist") 
+            dataPathsOrtho.append("codesQLDPC\HzOrtho.txt")#   ("codesQLDPC\HzOrtho_400_16.txt")# ("codesQLDPC\HorthoMatrix_Hypergraph_" + str(N//2) + "_" + str(NK) + ".txt") #("codesQLDPC\Hortho_new.txt") #("codesQLDPC\Hz.txt") ("codesQLDPC\logicalWords.txt")# 
             modelsPaths.append("Models\\QHypergraph_N129_Nk28_Liu10^4")#("Models\\" + str(parityCode) + "_N" + str(N//2) + "_Nk" + str(NK))
             resultsPaths.append("Results\\" + str(parityCode) + "_N"+ str(N//2) + "_NK" + str(NK) + "_NBP_" + str(lMax) + "it_" + str(channelType) + ".txt")
         
@@ -154,7 +154,7 @@ def CodeInitialization(parityCode):
         batchSizeTrain = allParameters[0].size * 20
         learningRate = 0.001
         epochs = 1000
-        batchSizeTest = 1
+        batchSizeTest = 100
     #------------------------------------------------------------------------------------------
 
     iniDescriptor.Ns = Ns

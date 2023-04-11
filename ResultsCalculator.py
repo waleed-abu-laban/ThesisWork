@@ -45,7 +45,7 @@ class QuantumCalculator(BaseCalculator):
         filterDataHmat = logicalOpErrors > 0
         
         #errorCountTotal += np.sum(np.dot(self.Hortho, errorWord) % 2)
-        frameErrorCountCurrent = self.frameErrorCount + (np.sum(1*(filterDataSynd)) + np.sum(1*(filterDataHmat))) #np.sum(1*(test > 0)) #
+        frameErrorCountCurrent = self.frameErrorCount + (np.sum(1*(filterDataSynd))) #+ np.sum(1*(filterDataHmat))) #np.sum(1*(test > 0)) #
         if(self.updateOn):
             self.frameErrorCount = frameErrorCountCurrent
         errorRate = frameErrorCountCurrent / frameCountCurrent

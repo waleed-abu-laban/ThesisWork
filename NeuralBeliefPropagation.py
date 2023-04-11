@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 from MathFunctions import Fermi, IsFloat
+from ldpc.mod2 import rank
 ERASURE = 0.3333
 
 class NBPInstance(tf.Module):
@@ -18,7 +19,8 @@ class NBPInstance(tf.Module):
         self.SetSyndrome(tf.zeros((self.vNodes.shape[0], Channel.GetBatchSize())))
         self.weights = tf.ones(shape=(lMax, CodeDescriptor.EdgesCount), dtype=tf.float64)
         self.biases = tf.ones(shape=(lMax, CodeDescriptor.vNodes.shape[0]), dtype=tf.float64)
-        self.H = tf.constant(np.loadtxt("codesQLDPC\HMatrix_Hypergraph_129_28.txt"), dtype=tf.int32) #(np.loadtxt("codesQLDPC\Hz_400_16.txt"), dtype=tf.int32) #
+        self.H = tf.constant(np.loadtxt("codesQLDPC\Hz.txt"), dtype=tf.int32)#(np.loadtxt("codesQLDPC\HMatrix_Hypergraph_129_28.txt"), dtype=tf.int32) #  (np.loadtxt("codesQLDPC\Hz_400_16.txt"), dtype=tf.int32) #
+        self.Hx = tf.constant(np.loadtxt("codesQLDPC\Hx.txt"), dtype=tf.int32)#  (np.loadtxt("codesQLDPC\Hx_400_16.txt"), dtype=tf.int32) #
         tf.random.set_seed(100)
 
     def SetLossFunctor(self, LossFunctor):
@@ -65,6 +67,7 @@ class NBPInstance(tf.Module):
         biasesIt = tf.tile(tf.reshape(self.biases[iteration], [-1, 1]), [1, Edges.shape[1]])
         weightedEdges =  tf.gather(Edges, self.vNodes) * tf.gather(weightsIt, self.vNodes)
         biasedLLRs = LLRs * biasesIt
+        weightedEdgesTest = weightedEdges.numpy()
         sum = biasedLLRs + tf.reduce_sum(weightedEdges, axis = 1) # Calculate Variable Belief
         flatIndices = tf.reshape(self.vNodes, [-1])
         newValues =  tf.repeat(sum, repeats=self.vDegrees, axis = 0) - tf.gather(Edges, flatIndices) * tf.gather(weightsIt, flatIndices) 
@@ -262,6 +265,7 @@ class NBPInstance(tf.Module):
         if(self.isSyndromeBased):
             decodedSynd = self.CalculateSyndromeLLRs(decodedLLRs)
             originalSynd = 1 * np.array(self.syndrome < 0)
+            test = np.sum(np.abs(originalSynd - decodedSynd), axis=0)
             self.terminated = np.logical_or(self.terminated, np.sum(np.abs(originalSynd - decodedSynd), axis=0) == 0)
         else:
             decodedSynd = self.CalculateSyndrome(Edges)
@@ -273,6 +277,9 @@ class NBPInstance(tf.Module):
         filteredSyndrome = tf.boolean_mask(self.syndrome, tf.logical_not(self.terminated), axis=1)
 
         filteredEdges = self.CalculateCMarginals(filteredEdges, filteredSyndrome) # Check nodes
+        filteredEdgesTest = filteredEdges.numpy()
+        filteredEdges = tf.clip_by_value(filteredEdges, clip_value_min=-100, clip_value_max=100)
+        filteredEdgesTest2 = filteredEdges.numpy()
         filteredEdges, filteredDecodedLLRs = self.CalculateVMarginals(filteredEdges, iteration, filteredLLRs) # Variable nodes
         iteration += 1
         
@@ -280,11 +287,14 @@ class NBPInstance(tf.Module):
         Edges = tf.transpose(tf.tensor_scatter_nd_update(tf.transpose(Edges), indices, tf.transpose(filteredEdges)))
         decodedLLRs = tf.transpose(tf.tensor_scatter_nd_update(tf.transpose(decodedLLRs), indices, tf.transpose(filteredDecodedLLRs)))
         
-        # condition = tf.cast(tf.logical_not(tf.cast(self.decimationMask, bool)), tf.float64)
-        # Edges = Edges * condition + self.decimationMask
-        # Edges = tf.clip_by_value(Edges, clip_value_min=-20, clip_value_max=20)
-        # condition2 = tf.cast(tf.logical_not(tf.cast(self.VNMaskValues, bool)), tf.float64)
-        # decodedLLRs = decodedLLRs * condition2 + self.VNMaskValues
+        condition = tf.cast(tf.logical_not(tf.cast(self.decimationMask, bool)), tf.float64)
+        Edges = Edges * condition + self.decimationMask
+        Edges = tf.clip_by_value(Edges, clip_value_min=-100, clip_value_max=100)
+        condition2 = tf.cast(tf.logical_not(tf.cast(self.VNMaskValues, bool)), tf.float64)
+        decodedLLRs = decodedLLRs * condition2 + self.VNMaskValues
+
+        conditionTest = condition.numpy()
+        condition2Test = condition2.numpy()
 
         terminatedBefore = self.terminated
         self.CalculateTermination(decodedLLRs, Edges)
@@ -336,17 +346,35 @@ class NBPInstance(tf.Module):
 
         return decodedWord, Edges, iteration, 0
     
-    def DecimateNodes(self, decodedLLRs):
-        VNMask = tf.logical_not(tf.cast(self.VNMaskValues, bool))
-        filteredDecodedLLRs = tf.abs(tf.where(VNMask, decodedLLRs, 0)) #tf.abs(tf.ragged.boolean_mask(decodedLLRs, VNMask).to_tensor(default_value=0))
-        vNodeIndex = tf.argmax(filteredDecodedLLRs, axis=0, output_type=tf.int32)
-        indices = tf.stack([vNodeIndex, tf.range(vNodeIndex.shape[0])], axis=1)
-        updates = tf.gather_nd(filteredDecodedLLRs, indices)
+    def DecimateNodes(self, decodedLLRs, decimationCounter, localCounter):
+        VNMaskValuesTemp = self.VNMaskValues
+        while(True):
+            VNMask = tf.logical_not(tf.cast(VNMaskValuesTemp, bool))
+            test = (tf.cast(VNMaskValuesTemp, bool)).numpy()
+            filteredDecodedLLRs = tf.where(VNMask, decodedLLRs, 1e8)
+            absFilteredDecodedLLRs = tf.abs(filteredDecodedLLRs) #tf.abs(tf.ragged.boolean_mask(decodedLLRs, VNMask).to_tensor(default_value=0))
+            vNodeIndex = tf.argmin(absFilteredDecodedLLRs, axis=0, output_type=tf.int32)
+            indices = tf.stack([vNodeIndex, tf.range(vNodeIndex.shape[0])], axis=1)
+            updates1 = tf.gather_nd(filteredDecodedLLRs, indices)
+            decimationCounter = decimationCounter #+ tf.cast(abs(updates1) >= 10, tf.float64)
+            
+            updatesFactor = 1
+            if(localCounter != 0):
+                modOp = localCounter % 2
+                updatesFactor = pow(-1, modOp) 
+            updates = updates1 * 1000 * updatesFactor
+            VNMaskValuesTemp = tf.tensor_scatter_nd_update(VNMaskValuesTemp, indices, updates)
+            #if(self.RankCheck(vNodeIndex)):
+            if(localCounter != 0):
+                localCounter = (localCounter - modOp)/2
+            break
+
         self.VNMaskValues = tf.tensor_scatter_nd_update(self.VNMaskValues, indices, updates)
 
         flatIndices = tf.reshape(self.vNodes, [-1])
         newValues =  tf.repeat(self.VNMaskValues, repeats=self.vDegrees, axis = 0)
         self.decimationMask = self.IndexFilter(self.decimationMask, flatIndices, newValues)
+        return decimationCounter, localCounter
     
     def DecimateNodesOld(self, decodedLLRs, CNMask):
         Edges = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
@@ -471,40 +499,64 @@ class NBPInstance(tf.Module):
 
     def DecimatedBeliefPropagation(self, ResultsCalculator):
         channelOutput, channelInput = self.GenerateCodeWords()
-        NumberOfDecimatedNodesPerBP = 10
-        NumberOfBPOperations = 1
-        self.decimationMask = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
-        self.VNMaskValues = tf.zeros([self.vNodes.shape[0], self.batchSize], dtype=tf.float64)
+        NumberOfDecimatedNodesPerBP = 1
+        NumberOfBPOperations = 6 #192 #45
         ResultsCalculator.SetUpdate(False)
-        
-        for i in range(NumberOfBPOperations + 1) :
-            EdgesIni = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
-            EdgesIni = self.FillEdges(EdgesIni, self.LLRs)
-            condition = tf.cast(tf.logical_not(tf.cast(self.decimationMask, bool)), tf.float64)
-            EdgesIni = EdgesIni * condition + self.decimationMask
-            EdgesIni = tf.clip_by_value(EdgesIni, clip_value_min=-20, clip_value_max=20)
+        currentDecimationCounter = 0
+        localCounter = 0
+        decimationCounter = 0
+        self.terminated = np.zeros(self.batchSize, dtype=bool)
+        self.decodedWords = tf.zeros_like(self.LLRs, dtype=tf.int32)
 
-            self.terminated = np.zeros(EdgesIni.shape[1], dtype=bool)
-            self.decodedWords = tf.zeros_like(self.LLRs, dtype=tf.int32)
-            # parameters: [decodedLLRs, iteration, loss]
-            decodedLLRs, Edges, iteration, loss = \
-                tf.nest.map_structure(tf.stop_gradient,\
-                                tf.while_loop(\
-                                self.ContinueCalculation,\
-                                self.BeliefPropagationIt,\
-                                [tf.ones([self.vNodes.shape[0], self.batchSize], dtype=tf.float64) * -1,\
-                                EdgesIni,\
-                                tf.constant(0,dtype=tf.int32),\
-                                tf.constant(0.0, dtype=tf.float64)]))
+        while(True):
+            self.decimationMask = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
+            self.VNMaskValues = tf.zeros([self.vNodes.shape[0], self.batchSize], dtype=tf.float64)
+            self.FRMat = tf.zeros([self.Hx.shape[0], 0], tf.int32)
+            
+            for i in range(NumberOfBPOperations + 1) :
+                EdgesIni = tf.zeros([self.EdgesCount, self.batchSize], dtype=tf.float64)
+                EdgesIni = self.FillEdges(EdgesIni, self.LLRs)
+                condition = tf.cast(tf.logical_not(tf.cast(self.decimationMask, bool)), tf.float64)
+                EdgesIni = EdgesIni * condition + self.decimationMask
+                EdgesIni = tf.clip_by_value(EdgesIni, clip_value_min=-100, clip_value_max=100)
+                test = EdgesIni.numpy()
 
-            if(i != NumberOfBPOperations):
-                errorWord = ((decodedLLRs < 0).numpy() + channelOutput + channelInput) % 2 
-                ResultsCalculator.CaclulateErrorRate(errorWord, self.terminated)
-                for _ in range(NumberOfDecimatedNodesPerBP):
-                    self.DecimateNodes(decodedLLRs)
-                print("Decimated Nodes : " + str((i + 1) * NumberOfDecimatedNodesPerBP))
-            else:
-                print("Decimation Done")
+                # parameters: [decodedLLRs, iteration, loss]
+                decodedLLRs, Edges, iteration, loss = \
+                    tf.nest.map_structure(tf.stop_gradient,\
+                                    tf.while_loop(\
+                                    self.ContinueCalculation,\
+                                    self.BeliefPropagationIt,\
+                                    [tf.ones([self.vNodes.shape[0], self.batchSize], dtype=tf.float64) * -1,\
+                                    EdgesIni,\
+                                    tf.constant(0,dtype=tf.int32),\
+                                    tf.constant(0.0, dtype=tf.float64)]))
+                
+                if(decimationCounter > currentDecimationCounter):
+                    currentDecimationCounter = decimationCounter
+                    localCounter = decimationCounter
+                    break
+                if(np.sum(1 * np.logical_not(self.terminated)) > 0):
+                    if(i != NumberOfBPOperations):
+                        errorWord = ((decodedLLRs < 0).numpy() + channelOutput + channelInput) % 2 
+                        ResultsCalculator.CaclulateErrorRate(errorWord, self.terminated)
+                        for _ in range(NumberOfDecimatedNodesPerBP):
+                            decimationCounter, localCounter = self.DecimateNodes(decodedLLRs, currentDecimationCounter, localCounter)
+                            if(decimationCounter > currentDecimationCounter):
+                                print("Stopped Decimating at :" + str(decimationCounter))
+                                break
+                        print("Decimated Nodes : " + str((i + 1) * NumberOfDecimatedNodesPerBP))
+                    else:
+                        currentDecimationCounter += 1
+                        localCounter = currentDecimationCounter
+                        print("Decimation Round Done")
+                else:
+                    break
+            
+            break
+            #Terminate the while(True)
+            if((np.sum(1 * np.logical_not(self.terminated)) == 0) or (currentDecimationCounter == (2 ** NumberOfBPOperations))):
+                break
 
         ResultsCalculator.SetUpdate(True)
         return Edges, tf.cast(decodedLLRs < 0, tf.int64), channelOutput, channelInput
@@ -557,6 +609,15 @@ class NBPInstance(tf.Module):
 
         return decodedWords
 
+    def RankCheck(self, nodeIndex):
+        test2 = nodeIndex.numpy()[0]
+        test = tf.gather(self.Hx, [test2], axis=1)
+        newFRMat = tf.concat([self.FRMat, test], axis=1)
+
+        if(rank(self.FRMat.numpy()) < rank(newFRMat.numpy())):
+            self.FRMat = newFRMat
+            return True
+        return False
 
     def GenerateCodeWords(self):
         LLRs, channelOutput, channelInput = self.Channel.GenerateLLRs(True)
